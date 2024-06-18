@@ -1,0 +1,2 @@
+# local_llm_tools
+Ollamaを利用したローカル生成AI開発

@@ -10,6 +10,12 @@ dependencies = [
     "requests>=2.32.3",
     "pandas>=2.2.2",
     "ollama>=0.2.1",
+    "pillow>=10.3.0",
+    "langchain>=0.3.15",
+    "langchain-ollama>=0.2.2",
+    "openai>=1.60.1",
+    "langchain-openai>=0.3.2",
+    "langgraph>=0.2.67",
 ]
 readme = "README.md"
 requires-python = ">= 3.11"

@@ -1,12 +1,10 @@
-import streamlit as st
 from langchain_ollama import ChatOllama
-from langgraph.checkpoint.memory import MemorySaver
-from langgraph.prebuilt import create_react_agent
+import streamlit as st
 
-from local_llm_tools.chat_langfamily import tools
-from local_llm_tools.chat_langfamily.agent import ChatBot
+from local_llm_tools.langchain_chatbot.agent import ChatBot
 from local_llm_tools.utils import ollama as ollama_utils
 from local_llm_tools.utils.streamlit_components import display_llm_initial_configs
+
 
 # ページ情報
 st.set_page_config(page_title="Chatbot implemented by langfamily", layout="wide")
@@ -20,7 +18,7 @@ chatbot = st.session_state.chatbot
 # Layout
 col1, col2 = st.columns([8, 2])
 col1.title("Chat Bot")
-st.markdown("""OpenAIを使った基本的なChatBotシステム""")
+col1.markdown("""langchain系のchatbot""")
 col2.button(
     "リセット",
     key="clear_all",
@@ -45,16 +43,11 @@ else:
 
 
 # Make Client
-llm = ChatOllama(model=chatbot.model_name, **chatbot.params, stream=True)
-tools = [tools.math.add]
-# Initialize memory to persist state between graph runs
-checkpointer = MemorySaver()
-
-client = create_react_agent(llm, tools, checkpointer=checkpointer)
+client = ChatOllama(model=chatbot.model_name, **chatbot.params, stream=True)
 
 
 # Display chat messages from history
-for cnt, (msg, model_name, role) in enumerate(chatbot.history):
+for cnt, (msg, model_name, role) in enumerate(chatbot.history()):
     with st.chat_message(role):
         if model_name is not None:
             st.markdown(f"`From {model_name}`")

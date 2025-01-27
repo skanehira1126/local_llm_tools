@@ -40,3 +40,46 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/local_llm_tools"]
+
+[tool.black]
+line-length = 99
+target-version = ["py310"]
+include = '\.pyi?$'
+
+[tool.ruff]
+line-length = 99
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.ruff.lint]
+select = [
+    # pycodestyle
+    "E",
+    "W",
+    # Pyflakes
+    "F",
+    # mccabe
+    "C",
+    # isrot
+    "I",
+    # flake8-bugbear
+    "B",
+    # pyupgrade
+    "UP",
+    # Pylint 
+    # "PL",
+]
+ignore = [
+    "E203",
+    "D211",  # Conflict D203
+    "D212",  # Conflict D213
+]
+
+[tool.ruff.lint.isort]
+force-single-line = true
+force-sort-within-sections = true
+lines-after-imports = 2

@@ -1,6 +1,7 @@
 from functools import partialmethod
 
-from local_llm_tools.basic_chatbot.utils import ROLE, Message
+from local_llm_tools.basic_chatbot.utils import ROLE
+from local_llm_tools.basic_chatbot.utils import Message
 
 
 class ChatBot:
@@ -47,7 +48,6 @@ class ChatBot:
         """
         self.messages = []
 
-    @property
     def history(self):
         for msg in self.messages:
             yield msg, msg.model_name, msg.role

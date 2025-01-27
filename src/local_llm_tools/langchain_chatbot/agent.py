@@ -1,7 +1,10 @@
 from functools import partialmethod
 from typing import Literal
 
-from langchain.schema import AIMessage, HumanMessage, SystemMessage
+from langchain.schema import AIMessage
+from langchain.schema import HumanMessage
+from langchain.schema import SystemMessage
+
 from local_llm_tools.chat_langfamily.utils import get_role_of_message
 
 
@@ -32,12 +35,8 @@ class ChatBot:
         self.messages.append(msg_type(content=content))
         self.messages_model.append(model_name)
 
-    add_system_message = partialmethod(
-        add_message, model_name=None, msg_type=SystemMessage
-    )
-    add_user_message = partialmethod(
-        add_message, model_name=None, msg_type=HumanMessage
-    )
+    add_system_message = partialmethod(add_message, model_name=None, msg_type=SystemMessage)
+    add_user_message = partialmethod(add_message, model_name=None, msg_type=HumanMessage)
     add_assistant_message = partialmethod(add_message, msg_type=AIMessage)
 
     def set_params(self, **kwargs):
@@ -61,7 +60,6 @@ class ChatBot:
         self.messages = []
         self.messages_model = []
 
-    @property
     def history(self):
-        for msg, model_name in zip(self.messages, self.messages_model):
+        for msg, model_name in zip(self.messages, self.messages_model, strict=True):
             yield msg, model_name, get_role_of_message(msg)

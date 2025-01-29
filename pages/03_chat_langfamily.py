@@ -59,8 +59,8 @@ for cnt, (msg, model_name, role) in enumerate(history):
                 "",
                 key=str(cnt),
                 icon=":material/delete:",
-                # on_click=chatbot.delete_messages,
-                kwargs={"message_idx": cnt},
+                on_click=st.session_state.chatbot.delete_messages,
+                kwargs={"message_idx": cnt, "config": config},
             )
 
 
@@ -85,7 +85,10 @@ else:
 if is_update_chat_log:
     with st.chat_message("assistant"):
         # st.markdown(f"`From {chatbot.model_name}`")
-        stream = st.session_state.chatbot.chat_stream(prompt, config)
+        if is_display_system_prompt:
+            stream = st.session_state.chatbot.chat_stream(prompt, config, system_prompt)
+        else:
+            stream = st.session_state.chatbot.chat_stream(prompt, config)
         response = st.write_stream(stream)
 
     # chatbot.add_assistant_message(content=response, model_name=chatbot.model_name)

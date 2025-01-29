@@ -1,6 +1,7 @@
 from langchain.schema import AIMessage
 from langchain.schema import HumanMessage
 from langchain.schema import SystemMessage
+from langchain_core.messages import RemoveMessage
 from langchain_ollama import ChatOllama
 
 from local_llm_tools.langfamily_chatbot.build_graph import build_graph
@@ -39,30 +40,36 @@ class ChatBot:
         llm = ChatOllama(model=self.model_name, **self.params, stream=True)
         self._agent = build_graph(llm)
 
-    def chat_stream(self, user_input: str, config: dict):
+    def chat_stream(self, user_input: str, config: dict, system_promt: list[str] | None = None):
+        if system_promt is None:
+            messages = []
+        else:
+            messages = [{"role": "system", "content": system_promt}]
+        messages.append({"role": "user", "content": user_input})
+
         for event in self.agent.stream(
-            {"messages": [{"role": "user", "content": user_input}]},
+            {"messages": messages},
             config,
             stream_mode="messages",
         ):
             # (AIMessageChunk, dict)
-            # print(len(event), type(event[0]), event[0])
-            # print(len(event), type(event[1]), event[1])
             yield event[0].content
 
-    # def delete_messages(self, message_idx: int):
-    #     """
-    #     指定したindexまでのMessageを削除する
-    #     """
-    #     self.messages = self.messages[:message_idx]
-    #     self.messages_model = self.messages_model[:message_idx]
+    def delete_messages(self, message_idx: int, config: dict):
+        """
+        指定したindexまでのMessageを削除する
+        """
 
-    # def reset_message(self):
-    #     """
-    #     Messageの初期化
-    #     """
-    #     self.messages = []
-    #     self.messages_model = []
+        delete_messages = self.agent.get_state(config).values["messages"][message_idx:]
+        _ = self.agent.update_state(
+            config, {"messages": [RemoveMessage(id=msg.id) for msg in delete_messages]}
+        )
+
+    def reset_message(self):
+        """
+        Messageの初期化
+        """
+        self.build()
 
     def history(self, config):
         for msg in self._agent.get_state(config)[0]["messages"]:

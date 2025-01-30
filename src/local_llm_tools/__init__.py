@@ -8,7 +8,7 @@ fmt = Formatter(
     "[%(levelname)s] %(name)s %(asctime)s - %(filename)s: %(lineno)d: %(message)s",
 )
 sh = StreamHandler()
-sh.setLevel("INFO")
+sh.setLevel("DEBUG")
 sh.setFormatter(fmt)
 logger.addHandler(sh)
-logger.setLevel("INFO")
+logger.setLevel("DEBUG")

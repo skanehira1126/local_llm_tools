@@ -9,7 +9,7 @@ class SliderParameter(TypedDict):
 
 
 TEMPERATURE: SliderParameter = {
-    "value": 0.8,
+    "value": 0.1,
     "min_value": 0.0,
     "max_value": 1.0,
     "step": 0.05,

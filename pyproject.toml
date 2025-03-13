@@ -16,6 +16,13 @@ dependencies = [
     "openai>=1.60.1",
     "langchain-openai>=0.3.2",
     "langgraph>=0.2.67",
+    "jupyterlab>=4.3.5",
+    "jupyterlab-code-formatter>=3.0.2",
+    "jupyter-lsp>=2.2.5",
+    "black>=25.1.0",
+    "isort>=6.0.1",
+    "flake8>=7.1.2",
+    "markitdown>=0.0.2",
 ]
 readme = "README.md"
 requires-python = ">= 3.11"

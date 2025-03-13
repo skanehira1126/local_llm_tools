@@ -26,13 +26,14 @@ def display_llm_initial_configs(
             model_name = st.text_input("model_name")
 
         # ツール
-        options = ["math", "search"]
-        selection = st.pills("利用ツール", options, selection_mode="multi")
-        tools = []
-        if "math" in selection:
-            tools += MATH_TOOLS
-        if "search" in selection:
-            tools += SEARCH_TOOLS
+        if add_tools:
+            options = ["math", "search"]
+            selection = st.pills("利用ツール", options, selection_mode="multi")
+            tools = []
+            if "math" in selection:
+                tools += MATH_TOOLS
+            if "search" in selection:
+                tools += SEARCH_TOOLS
 
         # パラメータ
         temperature = st.slider(
@@ -46,4 +47,7 @@ def display_llm_initial_configs(
             **TOP_P,
         )
 
-    return system_prompt, model_name, temperature, top_p, tools
+    if add_tools:
+        return system_prompt, model_name, temperature, top_p, tools
+    else:
+        return system_prompt, model_name, temperature, top_p

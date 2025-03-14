@@ -9,6 +9,7 @@ from langchain_ollama import ChatOllama
 from langgraph.prebuilt import ToolNode
 
 from local_llm_tools.langfamily_agent.build_graph import build_graph
+from local_llm_tools.langfamily_agent.build_graph import build_graph_no_tools_use_llm
 from local_llm_tools.langfamily_agent.utils import get_role_of_message
 
 
@@ -20,6 +21,7 @@ class ChatBot:
         self,
         model_name: str,
         tools: list[StructuredTool],
+        is_tool_use_model: bool,
         params: dict | None = None,
     ):
         self.model_name = model_name
@@ -30,7 +32,9 @@ class ChatBot:
         if params is not None:
             self.params.update(params)
 
+        # OllamaはTool対応していないモデルがある
         self.tools = tools
+        self.is_tool_use_model = is_tool_use_model
 
         self._agent = None
 
@@ -52,8 +56,11 @@ class ChatBot:
 
     def build(self):
         llm = ChatOllama(model=self.model_name, **self.params, stream=True)
-        llm = llm.bind_tools(self.tools)
-        self._agent = build_graph(llm, ToolNode(self.tools))
+        if self.is_tool_use_model:
+            llm = llm.bind_tools(self.tools)
+            self._agent = build_graph(llm, ToolNode(self.tools))
+        else:
+            self._agent = build_graph_no_tools_use_llm(llm, self.tools)
 
     def chat_stream(self, user_input: str, config: dict, system_promt: list[str] | None = None):
         if system_promt is None:

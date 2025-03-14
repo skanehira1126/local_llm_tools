@@ -43,9 +43,11 @@ col2.button(
 config = {"configurable": {"thread_id": "1"}}
 
 if "chatbot" not in st.session_state:
-    system_prompt, model_name, temperature, top_p, tools = display_llm_initial_configs(
-        model_name_list=ollama_utils.enable_models(),
-        add_tools=True,
+    system_prompt, model_name, temperature, top_p, tools, is_tool_use_model = (
+        display_llm_initial_configs(
+            model_name_list=ollama_utils.enable_models(),
+            add_tools=True,
+        )
     )
     client = ChatBot(
         model_name=model_name,
@@ -54,6 +56,7 @@ if "chatbot" not in st.session_state:
             "top_p": top_p,
         },
         tools=tools,
+        is_tool_use_model=is_tool_use_model,
     )
 
     history = []

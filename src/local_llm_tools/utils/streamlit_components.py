@@ -1,3 +1,5 @@
+from logging import getLogger
+
 import streamlit as st
 
 from local_llm_tools.tools import MATH_TOOLS
@@ -6,6 +8,9 @@ from local_llm_tools.utils import helps
 from local_llm_tools.utils.llm_configs import SYSTEM_PROMPT
 from local_llm_tools.utils.llm_configs import TEMPERATURE
 from local_llm_tools.utils.llm_configs import TOP_P
+
+
+logger = getLogger(__name__)
 
 
 def display_llm_initial_configs(
@@ -27,6 +32,7 @@ def display_llm_initial_configs(
 
         # ツール
         if add_tools:
+            is_tool_use_model = st.checkbox("Tool対応モデル")
             options = ["math", "search"]
             selection = st.pills("利用ツール", options, selection_mode="multi")
             tools = []
@@ -48,6 +54,7 @@ def display_llm_initial_configs(
         )
 
     if add_tools:
-        return system_prompt, model_name, temperature, top_p, tools
+        logger.info(f"Selected tools : {tools},")
+        return system_prompt, model_name, temperature, top_p, tools, is_tool_use_model
     else:
         return system_prompt, model_name, temperature, top_p

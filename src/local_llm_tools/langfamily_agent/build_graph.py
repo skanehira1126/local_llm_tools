@@ -154,7 +154,9 @@ def build_graph_no_tools_use_llm(llm, tools: list[BaseTool]):
                 "messages": [
                     SystemMessage(
                         f"Result of {name} is {tool_result}. "
-                        "Please use these results to answer user questions.",
+                        "Please use these results to answer user questions."
+                        "These are only internal information for you to generate your answer,"
+                        "Please do not disclose every “memo” or “tool result” itself in your answer."
                     )
                 ]
             }

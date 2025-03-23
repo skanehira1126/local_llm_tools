@@ -5,7 +5,9 @@ import streamlit as st
 from local_llm_tools.langfamily_agent.agent import ChatBot
 from local_llm_tools.utils import ollama as ollama_utils
 from local_llm_tools.utils import setup_langsmith
+from local_llm_tools.utils.image import encode_image
 from local_llm_tools.utils.streamlit_components import display_llm_initial_configs
+from local_llm_tools.utils.streamlit_components import show_images
 
 
 logger = getLogger(__name__)
@@ -69,14 +71,21 @@ else:
 
 # Display chat messages from history
 for cnt, (msg, model_name, role) in enumerate(history):
-    if msg.content == "":
-        continue
+    # メッセージがないときはスキップ
+    # if msg.content == "":
+    #     continue
+
+    # 表示
     with st.chat_message(role):
         if model_name is not None:
             st.markdown(f"`From {model_name}`")
 
         col1, col2 = st.columns([8, 1])
-        col1.markdown(msg.content)
+
+        # text部分
+        col1.markdown(msg.text())
+
+        # userの入力の場合、削除ボタンを実装
         if role == "user":
             col2.button(
                 "",
@@ -86,9 +95,27 @@ for cnt, (msg, model_name, role) in enumerate(history):
                 kwargs={"message_idx": cnt, "config": config},
             )
 
+        # 画像がある場合に表示
+        if isinstance(msg.content, list):
+            images = (
+                content["image_url"]["url"]
+                for content in msg.content
+                if content["type"] == "image_url"
+            )
+            show_images(images, 3)
+
 
 # Handling user input
-if prompt := st.chat_input("何かお困りですか？"):
+if user_input := st.chat_input("何かお困りですか？", accept_file="multiple"):
+    prompt = user_input.text
+    files = user_input.files  # streamlitの一般的なファイルアップロード用の型
+
+    images = [
+        f"data:{f.type};base64,{encode_image(f.getvalue())}"
+        for f in files
+        if f.type.startswith("image")
+    ]
+
     if is_display_system_prompt:
         # system_promptが入ってない
         st.session_state.chatbot = client
@@ -97,6 +124,8 @@ if prompt := st.chat_input("何かお困りですか？"):
     # Display user Message
     with st.chat_message("user"):
         st.markdown(prompt)
+        if len(images):
+            show_images(images, 3)
 
     # ユーザの入力があった場合に処理が分岐するための制御
     is_update_chat_log = True
@@ -108,9 +137,9 @@ if is_update_chat_log:
     with st.chat_message("assistant"):
         # st.markdown(f"`From {chatbot.model_name}`")
         if is_display_system_prompt:
-            stream = st.session_state.chatbot.chat_stream(prompt, config, system_prompt)
+            stream = st.session_state.chatbot.chat_stream(prompt, images, config, system_prompt)
         else:
-            stream = st.session_state.chatbot.chat_stream(prompt, config)
+            stream = st.session_state.chatbot.chat_stream(prompt, images, config)
         response = st.write_stream(stream)
 
     # chatbot.add_assistant_message(content=response, model_name=chatbot.model_name)

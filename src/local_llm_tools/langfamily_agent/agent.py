@@ -5,7 +5,7 @@ from langchain.schema import HumanMessage
 from langchain.schema import SystemMessage
 from langchain_core.messages import RemoveMessage
 from langchain_core.tools.structured import StructuredTool
-from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import ToolNode
 
 from local_llm_tools.langfamily_agent.build_graph import build_graph
@@ -55,19 +55,52 @@ class ChatBot:
         self.params.update(kwargs)
 
     def build(self):
-        llm = ChatOllama(model=self.model_name, **self.params, stream=True)
+        llm = ChatOpenAI(
+            model=self.model_name,
+            **self.params,
+            stream=True,
+            base_url="http://localhost:11434/v1",
+            api_key="ollama",
+        )
         if self.is_tool_use_model:
             llm = llm.bind_tools(self.tools)
             self._agent = build_graph(llm, ToolNode(self.tools))
         else:
             self._agent = build_graph_no_tools_use_llm(llm, self.tools)
 
-    def chat_stream(self, user_input: str, config: dict, system_promt: list[str] | None = None):
+    def chat_stream(
+        self,
+        user_input: str,
+        images: list[str],
+        config: dict,
+        system_promt: list[str] | None = None,
+    ):
+        # system prompt
         if system_promt is None:
             messages = []
         else:
             messages = [{"role": "system", "content": system_promt}]
-        messages.append({"role": "user", "content": user_input})
+        # messages.append({"role": "user", "content": user_input})
+
+        # ユーザの入力
+        content = [{"type": "text", "text": user_input}]
+        for image_url in images:
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": image_url},
+                }
+            )
+        messages.append(HumanMessage(content=content))
+        # HumanMessage(
+        #     content=[
+        #         {"type": "text", "text": "describe the weather in this image"},
+        #         {
+        #             "type": "image_url",
+        #             "image_url": {"url": f"data:image/jpeg;base64,{image_data}"},
+        #         },
+        #     ],
+        # )
 
         for event in self.agent.stream(
             {"messages": messages},
@@ -75,6 +108,7 @@ class ChatBot:
             stream_mode="messages",
         ):
             # (AIMessageChunk, dict)
+            # print(event)
             yield event[0].content
 
     def delete_messages(self, message_idx: int, config: dict):

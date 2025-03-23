@@ -51,8 +51,8 @@ def divide(a: int | float, b: int | float) -> int | float:
     割り算を行う関数
 
     Args:
-        a (int | float): 割り算を行う1つ目の値
-        b (int | float): 割り算を行う2つ目の値
+        a (int | float): 割り算で割られる側の値
+        b (int | float): 割り算を割る側の値
 
     Returns:
         int | float: 割り算の結果

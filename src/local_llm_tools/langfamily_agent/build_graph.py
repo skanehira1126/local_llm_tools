@@ -1,17 +1,16 @@
 from logging import getLogger
 from typing import Annotated
+from typing import Any
 from typing import Literal
 from typing import TypedDict
 
-from langchain.schema import AIMessage
-from langchain.schema import HumanMessage
 from langchain.schema import SystemMessage
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import render_text_description
 from langchain_core.tools.base import BaseTool
-from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END
 from langgraph.graph import START
@@ -20,6 +19,7 @@ from langgraph.graph import StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from langgraph.types import Command
+from pydantic import BaseModel
 
 # 多分これがメッセージ追加してくれるらしい
 # from langgraph.graph.message import add_messages
@@ -27,13 +27,6 @@ from local_llm_tools.langfamily_agent.utils import get_role_of_message
 
 
 logger = getLogger(__name__)
-
-
-# class State(TypedDict):
-#     # Messages have the type "list". The `add_messages` function
-#     # in the annotation defines how this state key should be updated
-#     # (in this case, it appends messages to the list, rather than overwriting them)
-#     messages: Annotated[list, add_messages]
 
 
 def should_continue(state: MessagesState) -> Literal["tools", END]:
@@ -91,9 +84,23 @@ If you cannnot undertand to use which tools, please response JSON blob with 'nam
 
 
 def build_graph_no_tools_use_llm(llm, tools: list[BaseTool]):
+    tool_names = [t.name for t in tools]
+    if len(tool_names) == 0:
+        # 空のListでLiteralを作ることができない
+        tool_names = ["dummy"]
+    print(tool_names)
+
     class MyMessageState(TypedDict):
         messages: Annotated[list, add_messages]
         tool_call_request: dict
+
+    class ToolCall(BaseModel):
+        """
+        呼び出すツール判定のための型
+        """
+
+        name: Literal[*tool_names]
+        arguments: dict[str, Any]
 
     def chat(state: MyMessageState):
         logger.info("Called chat node")
@@ -113,10 +120,16 @@ def build_graph_no_tools_use_llm(llm, tools: list[BaseTool]):
                 [("system", system_prompt), ("user", "{input}")]
             )
             rendered_tools = render_text_description(tools)
-            model = ChatOllama(model=llm.model, temperature=0, format="json")
+            model = ChatOpenAI(
+                model=llm.model_name,
+                temperature=0,
+                base_url="http://localhost:11434/v1/",
+                api_key="ollama",
+            )
             chain = prompt | model | JsonOutputParser()
             tool_call_request = chain.invoke(
-                {"input": last_message.content, "rendered_tools": rendered_tools}
+                {"input": last_message.content, "rendered_tools": rendered_tools},
+                response_format=ToolCall,
             )
 
             goto = "chat" if tool_call_request["name"] == "unknown" else "tools"
@@ -174,10 +187,14 @@ def build_graph_no_tools_use_llm(llm, tools: list[BaseTool]):
     graph_builder.add_node("tools", invoke_tool)
 
     # Edge
-    # 終了判定はshould_continueが持ってる
-    graph_builder.add_edge(START, "judge_tool_use")
-    graph_builder.add_edge("tools", "chat_end")
-    graph_builder.add_edge("chat_end", END)
+    # toolがないときはただのchat
+    if len(tools):
+        graph_builder.add_edge(START, "judge_tool_use")
+        graph_builder.add_edge("tools", "chat_end")
+        graph_builder.add_edge("chat_end", END)
+    else:
+        graph_builder.add_edge(START, "chat")
+        graph_builder.add_edge("chat", END)
 
     # Memory
     memory = MemorySaver()

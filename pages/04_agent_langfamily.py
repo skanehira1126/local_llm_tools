@@ -71,10 +71,6 @@ else:
 
 # Display chat messages from history
 for cnt, (msg, model_name, role) in enumerate(history):
-    # メッセージがないときはスキップ
-    # if msg.content == "":
-    #     continue
-
     # 表示
     with st.chat_message(role):
         if model_name is not None:

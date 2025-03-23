@@ -50,11 +50,14 @@ def display_llm_initial_configs(
             help=helps.TEMPERATURE,
             **TEMPERATURE,
         )
-        top_p = st.slider(
-            "top_p",
-            help=helps.TOP_P,
-            **TOP_P,
-        )
+        if st.toggle("TOP_Pの調整"):
+            top_p = st.slider(
+                "top_p",
+                help=helps.TOP_P,
+                **TOP_P,
+            )
+        else:
+            top_p = None
 
     if add_tools:
         logger.info(f"Selected tools : {tools},")

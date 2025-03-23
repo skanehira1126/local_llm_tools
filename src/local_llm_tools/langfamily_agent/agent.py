@@ -8,8 +8,8 @@ from langchain_core.tools.structured import StructuredTool
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import ToolNode
 
+from local_llm_tools.langfamily_agent.build_graph import GemmaGraph
 from local_llm_tools.langfamily_agent.build_graph import build_graph
-from local_llm_tools.langfamily_agent.build_graph import build_graph_no_tools_use_llm
 from local_llm_tools.langfamily_agent.utils import get_role_of_message
 
 
@@ -66,7 +66,19 @@ class ChatBot:
             llm = llm.bind_tools(self.tools)
             self._agent = build_graph(llm, ToolNode(self.tools))
         else:
-            self._agent = build_graph_no_tools_use_llm(llm, self.tools)
+            llm_structured_output = ChatOpenAI(
+                model=self.model_name,
+                temperature=0.0,
+                base_url="http://localhost:11434/v1",
+                api_key="ollama",
+            )
+
+            gemma_graph = GemmaGraph(
+                llm_chat=llm,
+                llm_structured_output=llm_structured_output,
+                tools=self.tools,
+            )
+            self._agent = gemma_graph
 
     def chat_stream(
         self,
@@ -80,7 +92,6 @@ class ChatBot:
             messages = []
         else:
             messages = [{"role": "system", "content": system_promt}]
-        # messages.append({"role": "user", "content": user_input})
 
         # ユーザの入力
         content = [{"type": "text", "text": user_input}]
@@ -92,15 +103,6 @@ class ChatBot:
                 }
             )
         messages.append(HumanMessage(content=content))
-        # HumanMessage(
-        #     content=[
-        #         {"type": "text", "text": "describe the weather in this image"},
-        #         {
-        #             "type": "image_url",
-        #             "image_url": {"url": f"data:image/jpeg;base64,{image_data}"},
-        #         },
-        #     ],
-        # )
 
         for event in self.agent.stream(
             {"messages": messages},

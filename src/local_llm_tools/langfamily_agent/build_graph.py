@@ -1,4 +1,5 @@
 from logging import getLogger
+import operator
 from typing import Annotated
 from typing import Any
 from typing import Literal
@@ -11,6 +12,9 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import render_text_description
 from langchain_core.tools.base import BaseTool
 from langchain_openai import ChatOpenAI
+
+# text splitter どう管理するかは要検討
+from langchain_text_splitters import CharacterTextSplitter
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END
 from langgraph.graph import START
@@ -19,7 +23,6 @@ from langgraph.graph import StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from langgraph.types import Command
-from langgraph.types import Send
 from pydantic import BaseModel
 from pydantic import Field
 
@@ -89,6 +92,9 @@ class GemmaGraph:
         self.tools = tools
         self.tool_names = [t.name for t in tools] or ["dummy"]
         logger.info(f"Enable tools: {self.tool_names}")
+
+        # textを読み込んだ上での回答を生成するためのGraph
+        self.query_doc_graph = QueryDocGraph(llm_chat)
 
         class ToolCall(BaseModel):
             """
@@ -270,13 +276,86 @@ class QueryState(BaseModel):
     query: str = Field(description="The question provided by the user.")
 
 
-class InformationsState(BaseModel):
-    informations: list[str] = Field(
-        description="Relevant informations that can be used to answer the user's question."
+class InputState(BaseModel):
+    docs: dict[str, str] = Field(description="Input documents provided by the user")
+    question: str = Field(description="Question related to the document")
+
+
+class SplitDocs(BaseModel):
+    """
+    中間処理で利用する
+    """
+
+    doc_name: str = Field(description="Document name")
+    question: str = Field(description="Question related to the document")
+    contents: list[str] = Field(description="Segments of the document after splitting")
+
+
+class OutputState(BaseModel):
+    information: Annotated[list[str], operator.add] = Field(
+        default_factory=list, description="Document information used to answer the user question"
     )
+    answer: str
 
 
-class DocQueryGraph:
+class OverallState(InputState, OutputState):
+    complete_docs: list[str] = Field(description="Document list to complete searching")
+
+
+PROMPT_TEMPLATE = ChatPromptTemplate.from_messages(
+    (
+        "human",
+        """# System Prompt
+
+あなたはGoogle DeepMindのgemma3モデル(4b～12b量子化)です。
+ユーザから、以下の形式でMarkdown入力が与えられます:
+
+---
+
+## ユーザ入力 (例)
+
+**User Query**:
+{user_query}
+
+**Document Chunk**:
+{document_chunk}
+
+
+---
+
+## あなたの役割
+
+1. **User Query** と **Document Chunk** をもとに、ユーザの質問に答えるために必要な情報を抽出してください。
+2. 抽出した情報は **Markdown形式の文字列** で出力してください。
+   - たとえば、見出しを `###` で始めたり、箇条書きを `- ` で書くなど、Markdownを自由に用いてください。
+3. 該当する情報が全く見当たらない場合は `null` とだけ出力してください。
+
+---
+
+## 出力形式の具体例
+
+- **有益な情報がある場合の例:**
+
+```markdown
+### Relevant Info
+- この文書の主要なポイントは...
+- (Markdownの書式でまとめる)
+```
+
+- **有益な情報がない場合の例
+
+```markdown
+null
+```
+
+以上の指示に従って、必ずMarkdown形式のテキストあるいは null のいずれかを出力してください。
+それ以外の余計な文章や解説は不要です。
+""",
+    )
+)
+
+
+class QueryDocGraph:
     """
     Documentを読み込み、質問に回答する情報を探すグラフ
     """
@@ -284,11 +363,86 @@ class DocQueryGraph:
     def __init__(self, llm: ChatOpenAI):
         self.llm = llm
 
-    def _read_docs(self):
-        pass
+        # text splitようパラメータ
+        chunk_size = 500
+        chunk_overlap = 50
+        self.text_splitter = CharacterTextSplitter(
+            chunk_size=chunk_size, chunk_overlap=chunk_overlap
+        )
 
-    def _search_in_doc(self, query: QueryState):
+        self.graph = self.build_graph()
+
+    def build_graph(self):
+        graph = StateGraph(OverallState, input=InputState, output=OutputState)
+
+        # node
+        graph.add_node("split_docs", self._split_docs)
+        graph.add_node("search_in_doc", self._search_in_doc)
+        graph.add_node("generate_answer", self._generate_answer)
+
+        # edge
+        graph.add_edge(START, "split_docs")
+        graph.add_edge("search_in_doc", "split_docs")
+        graph.add_edge("generate_answer", END)
+
+        return graph.compile()
+
+    def _split_docs(self, state: OverallState):
         """
-        入力されたTopic内にユーザの質問に対する回答として必要なものがないか対策する
+        Documentを調査を行う形に分割して、回答探索 or 回答生成に振り分ける
         """
-        pass
+
+        if len(state.docs) == len(state.complete_docs):
+            goto = "generate_answer"
+            update = None
+        else:
+            target_doc_name = [doc for doc in state.docs if doc not in state.complete_docs][0]
+            target_doc_content = state.docs[target_doc_name]
+            contents = self.text_splitter.split_text(target_doc_content)
+
+            goto = "_root_doc_analysis"
+            update = {
+                "doc_name": target_doc_name,
+                "question": state.question,
+                "contents": contents,
+            }
+
+        return Command(
+            goto=goto,
+            update=update,
+        )
+
+    def _search_in_doc(self, state: SplitDocs):
+        """
+        Documentごとに分割し質問に対する探索を行う
+        """
+        information = []
+        for content in state.contents:
+            chain = PROMPT_TEMPLATE | self.llm
+            response = chain.invoke({"user_query": state.question, "document_chunk": content})
+            if response.text() == "null":
+                pass
+            else:
+                information.append(response.text())
+
+        return {
+            "complete_docs": [state.doc_name],
+            "information": information,
+        }
+
+    def _generate_answer(self, state: OverallState):
+        """
+        入力された文書を探索した結果を用いて回答を生成する
+        """
+        system_prompt = (
+            "以下の背景情報を用いて、ユーザの質問に回答してください\n"
+            "## 背景情報\n\n" + "-----\n\n".join(state.information)
+        )
+        return {
+            "answer": self.invoke(
+                [
+                    ("system", system_prompt),
+                    ("human", state.question),
+                ]
+            )
+        }

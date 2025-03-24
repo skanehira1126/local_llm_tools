@@ -1,5 +1,7 @@
+from dataclasses import dataclass
 from logging import getLogger
 
+import markitdown
 import streamlit as st
 
 from local_llm_tools.langfamily_agent.agent import ChatBot
@@ -8,6 +10,37 @@ from local_llm_tools.utils import setup_langsmith
 from local_llm_tools.utils.image import encode_image
 from local_llm_tools.utils.streamlit_components import display_llm_initial_configs
 from local_llm_tools.utils.streamlit_components import show_images
+
+
+@dataclass
+class SourceFile:
+    content: str
+    is_enable: bool
+
+
+def setup_sidebar():
+    """
+    ファイルを読み込むためのUIを追加
+    """
+    if "docs" not in st.session_state:
+        st.session_state.docs = {}
+
+    uploaded_files = st.file_uploader("ソースファイル", accept_multiple_files=True)
+
+    # 読み込み
+    md = markitdown.MarkItDown()
+    for uploaded_file in uploaded_files:
+        result = md.convert(uploaded_file)
+        st.session_state.docs[uploaded_file.name] = SourceFile(
+            content=result.text_content, is_enable=False
+        )
+
+    # 読み込んだファイルの有効化の制御
+    active_source_flles = st.pills(
+        "SourceFiles", st.session_state.docs.keys(), selection_mode="multi"
+    )
+    for file_name, doc in st.session_state.docs.items():
+        doc.is_enable = file_name in active_source_flles
 
 
 logger = getLogger(__name__)
@@ -44,6 +77,21 @@ col2.button(
 
 config = {"configurable": {"thread_id": "1"}}
 
+
+###############
+#
+# Side bar
+# ファイル管理
+#
+###############
+with st.sidebar:
+    setup_sidebar()
+
+###############
+#
+# 初期設定
+#
+###############
 if "chatbot" not in st.session_state:
     system_prompt, model_name, temperature, top_p, tools, is_tool_use_model = (
         display_llm_initial_configs(
@@ -69,7 +117,11 @@ else:
     is_display_system_prompt = False
 
 
+###############
+#
 # Display chat messages from history
+#
+###############
 for cnt, (msg, model_name, role) in enumerate(history):
     # 表示
     with st.chat_message(role):
@@ -101,7 +153,11 @@ for cnt, (msg, model_name, role) in enumerate(history):
             show_images(images, 3)
 
 
+###############
+#
 # Handling user input
+#
+###############
 if user_input := st.chat_input("何かお困りですか？", accept_file="multiple"):
     prompt = user_input.text
     files = user_input.files  # streamlitの一般的なファイルアップロード用の型
@@ -128,7 +184,11 @@ if user_input := st.chat_input("何かお困りですか？", accept_file="multi
 else:
     is_update_chat_log = False
 
-# ユーザの入力があった場合に、返答を生成する
+###############
+#
+# ユーザの入力に更新があった場合に更新
+#
+###############
 if is_update_chat_log:
     with st.chat_message("assistant"):
         # st.markdown(f"`From {chatbot.model_name}`")

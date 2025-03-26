@@ -36,13 +36,14 @@ def display_llm_initial_configs(
         # ツール
         if add_tools:
             is_tool_use_model = st.checkbox("Tool対応モデル")
-            options = ["math", "search"]
+            options = ["math", "search", "think"]
             selection = st.pills("利用ツール", options, selection_mode="multi")
             tools = []
             if "math" in selection:
                 tools += MATH_TOOLS
             if "search" in selection:
                 tools += SEARCH_TOOLS
+            is_enable_think_node = "think" in selection
 
         # パラメータ
         temperature = st.slider(
@@ -61,7 +62,15 @@ def display_llm_initial_configs(
 
     if add_tools:
         logger.info(f"Selected tools : {tools},")
-        return system_prompt, model_name, temperature, top_p, tools, is_tool_use_model
+        return (
+            system_prompt,
+            model_name,
+            temperature,
+            top_p,
+            tools,
+            is_tool_use_model,
+            is_enable_think_node,
+        )
     else:
         return system_prompt, model_name, temperature, top_p
 

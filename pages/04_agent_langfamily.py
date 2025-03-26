@@ -93,11 +93,17 @@ with st.sidebar:
 #
 ###############
 if "chatbot" not in st.session_state:
-    system_prompt, model_name, temperature, top_p, tools, is_tool_use_model = (
-        display_llm_initial_configs(
-            model_name_list=ollama_utils.enable_models(),
-            add_tools=True,
-        )
+    (
+        system_prompt,
+        model_name,
+        temperature,
+        top_p,
+        tools,
+        is_tool_use_model,
+        is_enable_think_node,
+    ) = display_llm_initial_configs(
+        model_name_list=ollama_utils.enable_models(),
+        add_tools=True,
     )
     client = ChatBot(
         model_name=model_name,
@@ -107,6 +113,7 @@ if "chatbot" not in st.session_state:
         },
         tools=tools,
         is_tool_use_model=is_tool_use_model,
+        is_enable_think_node=is_enable_think_node,
     )
 
     history = []
@@ -190,6 +197,15 @@ else:
 #
 ###############
 if is_update_chat_log:
+    # ユーザからのソースファイルの情報を反映
+    enable_files = {
+        name: file.content for name, file in st.session_state.docs.items() if file.is_enable
+    }
+    if len(enable_files):
+        st.session_state.chatbot.register_docs(enable_files)
+    else:
+        st.session_state.chatbot.register_docs(None)
+
     with st.chat_message("assistant"):
         # st.markdown(f"`From {chatbot.model_name}`")
         if is_display_system_prompt:

@@ -43,7 +43,7 @@ def display_llm_initial_configs(
                 tools += MATH_TOOLS
             if "search" in selection:
                 tools += SEARCH_TOOLS
-            is_enable_think_node = "think" in selection
+            is_enable_think_tool = "think" in selection
 
         # パラメータ
         temperature = st.slider(
@@ -69,7 +69,7 @@ def display_llm_initial_configs(
             top_p,
             tools,
             is_tool_use_model,
-            is_enable_think_node,
+            is_enable_think_tool,
         )
     else:
         return system_prompt, model_name, temperature, top_p

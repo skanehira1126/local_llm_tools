@@ -100,7 +100,7 @@ if "chatbot" not in st.session_state:
         top_p,
         tools,
         is_tool_use_model,
-        is_enable_think_node,
+        is_enable_think_tool,
     ) = display_llm_initial_configs(
         model_name_list=ollama_utils.enable_models(),
         add_tools=True,
@@ -113,7 +113,7 @@ if "chatbot" not in st.session_state:
         },
         tools=tools,
         is_tool_use_model=is_tool_use_model,
-        is_enable_think_node=is_enable_think_node,
+        is_enable_think_tool=is_enable_think_tool,
     )
 
     history = []
@@ -122,6 +122,18 @@ if "chatbot" not in st.session_state:
 else:
     history = st.session_state.chatbot.history(config)
     is_display_system_prompt = False
+
+    # toolを表示しておく
+    tool_names = [t.name for t in st.session_state.chatbot.agent.tools]
+    st.markdown("**Active Tools**")
+    st.pills(
+        "Actove Tools",
+        tool_names,
+        default=tool_names,
+        selection_mode="multi",
+        disabled=True,
+        label_visibility="collapsed",
+    )
 
 
 ###############

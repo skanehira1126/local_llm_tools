@@ -5,7 +5,6 @@ from typing import Any
 from typing import Literal
 from typing import TypedDict
 
-from langchain.schema import HumanMessage
 from langchain.schema import SystemMessage
 from langchain.tools import tool
 from langchain_core.messages.modifier import RemoveMessage
@@ -74,11 +73,24 @@ def build_graph(llm, tool_node: ToolNode):
 
 
 @tool
-def summarize_docs(query: str) -> str:
+def summarize_docs() -> str:
     """
     ユーザの問い合わせに対し回答をするためにファイルが必要であると考えられる場合に
     ファイルを読んで回答を生成する関数
 
+    """
+    # dummy
+    pass
+
+
+@tool
+def think() -> str:
+    """
+    Use the tool to think about something.
+    It will not obtain new information or change the
+    database, but just append the thought to the log.
+    Use it when complex reasoning or some cache memory
+    is needed.
     """
     # dummy
     pass
@@ -103,7 +115,7 @@ class GemmaGraph:
         llm_chat: ChatOpenAI,
         llm_structured_output: ChatOpenAI,
         tools: list[BaseTool],
-        is_enable_think_node: bool = False,
+        is_enable_think_tool: bool = False,
     ):
         # 利用するLLM
         self.llm_chat = llm_chat
@@ -111,7 +123,8 @@ class GemmaGraph:
 
         # graphの作成
         self._tools = tools
-        self.is_enable_think_node = is_enable_think_node
+        if is_enable_think_tool:
+            self._tools.append(think)
 
         # Documentを読み込むための変数
         self.query_doc_graph = None
@@ -158,14 +171,15 @@ class GemmaGraph:
         graph_builder.add_node("chat", self._chat)
         graph_builder.add_node("think", self._think)
         graph_builder.add_node("judge_tool_use", self._judge_tool_use)
-        graph_builder.add_node("tools", self._invoke_tool)
+        graph_builder.add_node("invoke_tools", self._invoke_tool)
         graph_builder.add_node("summarize_docs", self._summarize_docs)
         graph_builder.add_node("remove_messages", self._remove_messages)
 
         # Edge
         # toolがないときはただのchat
         graph_builder.add_conditional_edges(START, self._rooting_judge_tools)
-        graph_builder.add_edge("tools", "chat")
+        # graph_builder.add_edge("judge_tool_use", "invoke_tools")
+        graph_builder.add_edge("invoke_tools", "chat")
         graph_builder.add_edge("think", "chat")
         graph_builder.add_edge("summarize_docs", "chat")
         graph_builder.add_edge("chat", "remove_messages")
@@ -183,8 +197,6 @@ class GemmaGraph:
         """
         if len(self.tools):
             return "judge_tool_use"
-        elif self.is_enable_think_node:
-            return "think"
         else:
             return "chat"
 
@@ -268,10 +280,8 @@ class GemmaGraph:
             name: Literal[*self.tool_names]
             arguments: dict[str, Any]
 
-        # 最新のメッセージ
-        last_message = state["messages"][-1]
-
-        if get_role_of_message(last_message) == "system":
+        # 最後がシステムメッセージの場合はChat終了
+        if get_role_of_message(state["messages"][-1]) == "system":
             goto = END
             update = None
         else:
@@ -298,13 +308,16 @@ class GemmaGraph:
             )
 
             if tool_call_request["name"] == "unknown":
-                goto = "think"
+                goto = "chat"
                 update = None
             elif tool_call_request["name"] == "summarize_docs":
                 goto = "summarize_docs"
                 update = {"query": state["messages"][-1].text()}
+            elif tool_call_request["name"] == "think":
+                goto = "think"
+                update = {"query": state}
             else:
-                goto = "tools"
+                goto = "invoke_tools"
                 update = {"tool_call_request": tool_call_request}
 
         return Command(

@@ -126,14 +126,15 @@ else:
     # toolを表示しておく
     tool_names = [t.name for t in st.session_state.chatbot.agent.tools]
     st.markdown("**Active Tools**")
-    st.pills(
-        "Actove Tools",
-        tool_names,
-        default=tool_names,
-        selection_mode="multi",
-        disabled=True,
-        label_visibility="collapsed",
-    )
+    if len(tool_names):
+        st.pills(
+            "Active Tools",
+            tool_names,
+            default=tool_names,
+            selection_mode="multi",
+            disabled=True,
+            label_visibility="collapsed",
+        )
 
 
 ###############
@@ -213,17 +214,19 @@ if is_update_chat_log:
     enable_files = {
         name: file.content for name, file in st.session_state.docs.items() if file.is_enable
     }
-    if len(enable_files):
-        st.session_state.chatbot.register_docs(enable_files)
-    else:
-        st.session_state.chatbot.register_docs(None)
+    # if len(enable_files):
+    #     st.session_state.chatbot.register_docs(enable_files)
+    # else:
+    #     st.session_state.chatbot.register_docs(None)
 
     with st.chat_message("assistant"):
         # st.markdown(f"`From {chatbot.model_name}`")
         if is_display_system_prompt:
-            stream = st.session_state.chatbot.chat_stream(prompt, images, config, system_prompt)
+            stream = st.session_state.chatbot.chat_stream(
+                prompt, images, enable_files, config, system_prompt
+            )
         else:
-            stream = st.session_state.chatbot.chat_stream(prompt, images, config)
+            stream = st.session_state.chatbot.chat_stream(prompt, images, enable_files, config)
         response = st.write_stream(stream)
 
     # chatbot.add_assistant_message(content=response, model_name=chatbot.model_name)

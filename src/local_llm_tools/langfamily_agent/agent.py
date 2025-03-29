@@ -91,6 +91,7 @@ class ChatBot:
         self,
         user_input: str,
         images: list[str],
+        docs: dict[str, str] | None,
         config: dict,
         system_promt: list[str] | None = None,
     ):
@@ -112,7 +113,7 @@ class ChatBot:
         messages.append(HumanMessage(content=content))
 
         for event in self.agent.stream(
-            {"messages": messages},
+            {"messages": messages, "docs": docs},
             config,
             stream_mode="messages",
         ):

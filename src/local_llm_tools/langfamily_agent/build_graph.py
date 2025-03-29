@@ -1,5 +1,4 @@
 from logging import getLogger
-import operator
 from typing import Annotated
 from typing import Any
 from typing import Literal
@@ -16,8 +15,6 @@ from langchain_core.tools.base import BaseTool
 from langchain_openai import ChatOpenAI
 
 # text splitter どう管理するかは要検討
-from langchain_text_splitters import CharacterTextSplitter
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END
 from langgraph.graph import START
@@ -27,9 +24,9 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from langgraph.types import Command
 from pydantic import BaseModel
-from pydantic import Field
 
 from local_llm_tools.langfamily_agent.utils import get_role_of_message
+from local_llm_tools.tools.read_documents import SearchDocGraph
 
 
 logger = getLogger(__name__)
@@ -73,17 +70,6 @@ def build_graph(llm, tool_node: ToolNode):
 
 
 @tool
-def summarize_docs() -> str:
-    """
-    ユーザの問い合わせに対し回答をするためにファイルが必要であると考えられる場合に
-    ファイルを読んで回答を生成する関数
-
-    """
-    # dummy
-    pass
-
-
-@tool
 def think() -> str:
     """
     Use the tool to think about something.
@@ -102,6 +88,7 @@ class RequestDocs(BaseModel):
 
 class MyMessageState(TypedDict):
     messages: Annotated[list, add_messages]
+    docs: dict[str, str] | None
     tool_call_request: dict
 
 
@@ -122,45 +109,20 @@ class GemmaGraph:
         self.llm_structured_output = llm_structured_output
 
         # graphの作成
-        self._tools = tools
+        self.tools = tools
         if is_enable_think_tool:
             self._tools.append(think)
 
         # Documentを読み込むための変数
-        self.query_doc_graph = None
+        self.search_docs_graph = SearchDocGraph(self.llm_chat)
 
         self.graph = self.build_graph()
-
-        logger.info(f"Enable tools: {self.tool_names}")
 
     def __getattr__(self, name):
         """
         StateGraphのWrapperとして活用する前提の実装
         """
         return getattr(self.graph, name)
-
-    @property
-    def enable_read_docs(self):
-        return self.query_doc_graph is not None
-
-    @property
-    def tools(self):
-        if self.enable_read_docs:
-            return self._tools + [summarize_docs]
-        else:
-            return self._tools
-
-    @property
-    def tool_names(self):
-        return [t.name for t in self.tools] or ["dummy"]
-
-    def register_docs(self, docs: dict[str, str] | None):
-        # textを読み込んだ上での回答を生成するためのGraph
-        if docs is None:
-            self.query_doc_graph = None
-        else:
-            logger.info("Set docs: {}".format(", ".join(docs.keys())))
-            self.query_doc_graph = QueryDocGraph(self.llm_chat, docs)
 
     def build_graph(self):
         # グラフ構築
@@ -172,7 +134,6 @@ class GemmaGraph:
         graph_builder.add_node("think", self._think)
         graph_builder.add_node("judge_tool_use", self._judge_tool_use)
         graph_builder.add_node("invoke_tools", self._invoke_tool)
-        graph_builder.add_node("summarize_docs", self._summarize_docs)
         graph_builder.add_node("remove_messages", self._remove_messages)
 
         # Edge
@@ -195,7 +156,8 @@ class GemmaGraph:
         """
         toolの有無によって向き先を変える
         """
-        if len(self.tools):
+        print(state)
+        if len(self.tools) or self.has_docs(state):
             return "judge_tool_use"
         else:
             return "chat"
@@ -251,6 +213,15 @@ class GemmaGraph:
             ]
         }
 
+    def has_docs(self, state: MyMessageState):
+        return not (state["docs"] is None or len(state["docs"]) == 0)
+
+    def get_tools(self, state: MyMessageState):
+        if self.has_docs(state):
+            return self.tools + [self.search_docs_graph.as_tool()]
+        else:
+            return self.tools
+
     def _judge_tool_use(self, state: MyMessageState) -> Literal["chat", "tools", END]:
         """
         Promptを元にToolを利用するか判断する
@@ -271,13 +242,23 @@ class GemmaGraph:
             """output the JSON object: {{"name": "unknown", "arguments": {{}} }}.\n"""
             "{documents_description}"
         )
+        # 変数を作成
+        tools = self.get_tools(state)
+        if self.has_docs(state):
+            documents_description = "User provided documents are available."
+        else:
+            documents_description = "There are NO documents from user."
+
+        rendered_tools = render_text_description(tools)
+        tool_names = [t.name for t in tools] or ["dummy"]
+        logger.info(f"Enable tools: {tool_names}")
 
         class ToolCall(BaseModel):
             """
             呼び出すツール判定のための型
             """
 
-            name: Literal[*self.tool_names]
+            name: Literal[*tool_names]
             arguments: dict[str, Any]
 
         # 最後がシステムメッセージの場合はChat終了
@@ -291,12 +272,6 @@ class GemmaGraph:
                     ("system", system_prompt),
                 ]
             )
-            # 変数を作成
-            rendered_tools = render_text_description(self.tools)
-            if self.query_doc_graph is None:
-                documents_description = "There are NO documents from user."
-            else:
-                documents_description = "There are documents from user."
 
             logger.info(f"Tools: {rendered_tools}")
             logger.info(f"Document description: {documents_description}")
@@ -310,9 +285,17 @@ class GemmaGraph:
             if tool_call_request["name"] == "unknown":
                 goto = "chat"
                 update = None
-            elif tool_call_request["name"] == "summarize_docs":
-                goto = "summarize_docs"
-                update = {"query": state["messages"][-1].text()}
+            elif tool_call_request["name"] == "Search Documents":
+                goto = "invoke_tools"
+                tool_call_request.update(
+                    {
+                        "arguments": {
+                            "query": state["messages"][-1].text(),
+                            "docs": state["docs"],
+                        }
+                    }
+                )
+                update = {"tool_call_request": tool_call_request}
             elif tool_call_request["name"] == "think":
                 goto = "think"
                 update = {"query": state}
@@ -324,20 +307,6 @@ class GemmaGraph:
             update=update,
             goto=goto,
         )
-
-    def _summarize_docs(self, state: RequestDocs):
-        """
-        ドキュメントを読み込んで要約する関数
-        """
-        logger.info(f"Summarize documents: query {state.query}")
-        return {
-            "messages": [
-                SystemMessage(
-                    self.query_doc_graph.invoke({"query": state.query})["summary"],
-                    response_metadata={"is_delete": True},
-                ),
-            ],
-        }
 
     def _invoke_tool(self, state: MyMessageState, config: RunnableConfig | None = None):
         """A function that we can use the perform a tool invocation.
@@ -353,7 +322,10 @@ class GemmaGraph:
             output from the requested tool
         """
         tool_call_request = state.get("tool_call_request")
-        tool_name_to_tool = {tool.name: tool for tool in self.tools}
+
+        tools = self.get_tools(state)
+        tool_name_to_tool = {tool.name: tool for tool in tools}
+
         name = tool_call_request["name"]
         requested_tool = tool_name_to_tool[name]
         try:
@@ -361,191 +333,13 @@ class GemmaGraph:
             return {
                 "messages": [
                     SystemMessage(
-                        f"Result of {name} is {tool_result}. "
-                        "Please use these results to answer user querys."
-                        "These are only internal information for you to generate your answer,"
+                        "Please use followed results to answer user querys.  \n"
+                        "These are only internal information for you to generate your answer, "
                         "Please do not disclose every “memo” or “tool result” itself in your answer."
+                        f"\n\n## Result of {name} \n\n {tool_result['summary']} "
                     )
                 ]
             }
         except:
             logger.exception(f"Arguments: {tool_call_request['arguments']}")
             return {"messages": [SystemMessage(f"Failed to execute tool: {name}")]}
-
-
-class QueryState(BaseModel):
-    content: str = Field(
-        description=(
-            "The target document from which to retrieve information necessary for "
-            "answering the user's query."
-        )
-    )
-    query: str = Field(description="The query provided by the user.")
-
-
-class InputState(BaseModel):
-    query: str = Field(description="Question related to the document")
-
-
-class SplitDocs(BaseModel):
-    """
-    中間処理で利用する
-    """
-
-    doc_name: str = Field(description="Document name")
-    query: str = Field(description="Question related to the document")
-    contents: list[str] = Field(description="Segments of the document after splitting")
-
-
-class OutputState(BaseModel):
-    information: Annotated[list[str], operator.add] = Field(
-        default_factory=list, description="Document information used to answer the user query"
-    )
-    summary: str
-
-
-class OverallState(InputState, OutputState):
-    complete_docs: list[str] = Field(
-        default_factory=list,
-        description="Document list to complete searching",
-    )
-
-
-PROMPT_TEMPLATE = ChatPromptTemplate.from_messages(
-    [
-        (
-            "system",
-            """あなたは、与えられた文書の一部（チャンク）と、文書全体に対するユーザの質問を入力として受け取るエージェントです。以下のルールに従って出力を行ってください。
-
-1. あなたの目的は、チャンク内から「ユーザの質問に関連する情報」を抜き出し、回答作成に役立つ要点をリスト化することです。回答そのものは作成しません。
-2. 抽出した情報がある場合は箇条書き形式で要点をまとめてください。内容に引用元が分かるようであれば行番号や見出しなどを簡単に示してください。
-3. 質問に関連する情報がチャンク内に全く含まれない場合は、`null`のみを出力してください。
-4. 質問移管する情報が含まれる場合は出力の先頭には必ず「#### Relevance Extraction」という見出しをつけてください。
-5. この抽出以外の目的や情報を付与しないでください。与えられたチャンク以外の知識や推測も付け加えないでください。
-6. 冗長な説明や解釈、推測は行わず、チャンク内の情報のみを正確に反映してください。
-
-これらの指示に反する出力は行わないでください。
-""",
-        ),
-        (
-            "human",
-            """\
-## 文書のチャンク
-{document_chunk}
-
-## ユーザの質問
-{user_query}
-""",
-        ),
-    ]
-)
-
-
-class QueryDocGraph:
-    """
-    Documentを読み込み、質問に回答する情報を探すグラフ
-    """
-
-    def __init__(self, llm: ChatOpenAI, docs: dict[str, str]):
-        self.llm = llm
-        self.docs = docs
-
-        # text splitパラメータ
-        chunk_size = 2000
-        chunk_overlap = 400
-        self.text_splitter = CharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            length_function=self.length_function,
-        )
-
-        self.graph = self.build_graph()
-
-    def length_function(self, documents: list[str]) -> int:
-        """Get number of tokens for input contents."""
-        return sum(self.llm.get_num_tokens(doc) for doc in documents)
-
-    def __getattr__(self, name):
-        """
-        StateGraphのWrapperとして活用する前提の実装
-        """
-        return getattr(self.graph, name)
-
-    def build_graph(self):
-        graph = StateGraph(OverallState, input=InputState, output=OutputState)
-
-        # node
-        graph.add_node("split_docs", self._split_docs)
-        graph.add_node("search_in_doc", self._search_in_doc)
-        graph.add_node("generate_answer", self._generate_answer)
-
-        # edge
-        graph.add_edge(START, "split_docs")
-        graph.add_edge("search_in_doc", "split_docs")
-        graph.add_edge("generate_answer", END)
-
-        return graph.compile()
-
-    def _split_docs(self, state: OverallState):
-        """
-        Documentを調査を行う形に分割して、回答探索 or 回答生成に振り分ける
-        """
-        logger.info("START reading documents.")
-
-        if len(self.docs) == len(state.complete_docs):
-            goto = "generate_answer"
-            update = None
-        else:
-            target_doc_name = [doc for doc in self.docs if doc not in state.complete_docs][0]
-            target_doc_content = self.docs[target_doc_name]
-            contents = self.text_splitter.split_text(target_doc_content)
-
-            goto = "search_in_doc"
-            update = {
-                "doc_name": target_doc_name,
-                "query": state.query,
-                "contents": contents,
-            }
-
-        return Command(
-            goto=goto,
-            update=update,
-        )
-
-    def _search_in_doc(self, state: SplitDocs):
-        """
-        Documentごとに分割し質問に対する探索を行う
-        """
-        logger.info("Search information from documents")
-        information = []
-        for content in state.contents:
-            chain = PROMPT_TEMPLATE | self.llm
-            response = chain.invoke({"user_query": state.query, "document_chunk": content})
-            logger.info(
-                "Check text is null: {}".format(response.text().replace("\n", "") == "null")
-            )
-            logger.info(response.text())
-            if response.text().replace("\n", "") == "null":
-                pass
-            else:
-                information.append(response.text())
-
-        return {
-            "complete_docs": [state.doc_name],
-            "information": information,
-        }
-
-    def _generate_answer(self, state: OverallState):
-        """
-        入力された文書を探索した結果を用いて回答を生成する
-        """
-        logger.info("Generate answer from infomation")
-        logger.info(f"The number of information: {len(state.information)}")
-        system_prompt = (
-            "ユーザの質問に回答するためにファイルから回答に必要な情報を背景情報として抽出しました"
-            "\n## 背景情報\n\n "
-            + "-----\n\n".join(state.information)
-            + "\n## 依頼\n"
-            + "以上の背景情報を活用して、ユーザの質問に回答してください。\n"
-        )
-        return {"summary": system_prompt}

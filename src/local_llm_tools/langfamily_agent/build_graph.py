@@ -5,12 +5,12 @@ from typing import Literal
 from typing import TypedDict
 
 from langchain.schema import SystemMessage
-from langchain.tools import tool
 from langchain_core.messages.modifier import RemoveMessage
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import render_text_description
+
+# from langchain_core.tools import render_text_description
 from langchain_core.tools.base import BaseTool
 from langchain_openai import ChatOpenAI
 
@@ -27,6 +27,8 @@ from pydantic import BaseModel
 
 from local_llm_tools.langfamily_agent.utils import get_role_of_message
 from local_llm_tools.tools.read_documents import SearchDocGraph
+from local_llm_tools.tools.think import ThinkGraph
+from local_llm_tools.utils.llm import render_text_description
 
 
 logger = getLogger(__name__)
@@ -69,19 +71,6 @@ def build_graph(llm, tool_node: ToolNode):
     return graph
 
 
-@tool
-def think() -> str:
-    """
-    Use the tool to think about something.
-    It will not obtain new information or change the
-    database, but just append the thought to the log.
-    Use it when complex reasoning or some cache memory
-    is needed.
-    """
-    # dummy
-    pass
-
-
 class RequestDocs(BaseModel):
     query: str
 
@@ -100,29 +89,28 @@ class GemmaGraph:
     def __init__(
         self,
         llm_chat: ChatOpenAI,
-        llm_structured_output: ChatOpenAI,
         tools: list[BaseTool],
         is_enable_think_tool: bool = False,
+        llm_common_params: dict | None = None,
     ):
         # 利用するLLM
         self.llm_chat = llm_chat
-        self.llm_structured_output = llm_structured_output
 
         # graphの作成
         self.tools = tools
         if is_enable_think_tool:
-            self._tools.append(think)
+            self.tools.append(
+                ThinkGraph(ChatOpenAI(**llm_common_params, temperature=1.0)).as_tool()
+            )
 
-        # Documentを読み込むための変数
-        self.search_docs_graph = SearchDocGraph(self.llm_chat)
+        # LLMを利用するTook
+        self.search_docs_graph = SearchDocGraph(
+            ChatOpenAI(**llm_common_params, temperature=1.0, max_tokens=1000)
+        )
 
         self.graph = self.build_graph()
 
-    def __getattr__(self, name):
-        """
-        StateGraphのWrapperとして活用する前提の実装
-        """
-        return getattr(self.graph, name)
+        self.llm_common_params = llm_common_params or {}
 
     def build_graph(self):
         # グラフ構築
@@ -131,7 +119,6 @@ class GemmaGraph:
         # Nodes
         # graph_builder.add_node("rooting_judge_tools", self._rooting_judge_tools)
         graph_builder.add_node("chat", self._chat)
-        graph_builder.add_node("think", self._think)
         graph_builder.add_node("judge_tool_use", self._judge_tool_use)
         graph_builder.add_node("invoke_tools", self._invoke_tool)
         graph_builder.add_node("remove_messages", self._remove_messages)
@@ -139,10 +126,7 @@ class GemmaGraph:
         # Edge
         # toolがないときはただのchat
         graph_builder.add_conditional_edges(START, self._rooting_judge_tools)
-        # graph_builder.add_edge("judge_tool_use", "invoke_tools")
         graph_builder.add_edge("invoke_tools", "chat")
-        graph_builder.add_edge("think", "chat")
-        graph_builder.add_edge("summarize_docs", "chat")
         graph_builder.add_edge("chat", "remove_messages")
         graph_builder.add_edge("remove_messages", END)
 
@@ -180,37 +164,6 @@ class GemmaGraph:
         ]
         return {
             "messages": remove_messages,
-        }
-
-    def _think(self, state: MyMessageState):
-        logger.info("Thinking....")
-        internal_prompt = (
-            "Perform a detailed internal thought process on the user's input. "
-            "Do not include any meta instructions or tool usage details in the final output; "
-            "focus only on key reasoning insights."
-        )
-
-        thought = self.llm_chat.invoke(
-            state["messages"][-3:]
-            + [
-                SystemMessage(internal_prompt),
-            ]
-        )
-
-        return {
-            "messages": [
-                SystemMessage(
-                    "[Internal Thought Process Output]  \n"
-                    "For the given user input, the following internal thought process was executed:\n"
-                    "\n"
-                    f"{thought.text()}\n"
-                    "\n"
-                    "[Instructions]  \n"
-                    "Using the above internal thought process as context,"
-                    "generate the most appropriate and comprehensive response to the user's query."
-                    "For answer to your prompt",
-                )
-            ]
         }
 
     def has_docs(self, state: MyMessageState):
@@ -259,7 +212,7 @@ class GemmaGraph:
             """
 
             name: Literal[*tool_names]
-            arguments: dict[str, Any]
+            arguments: dict[str, dict]
 
         # 最後がシステムメッセージの場合はChat終了
         if get_role_of_message(state["messages"][-1]) == "system":
@@ -276,10 +229,14 @@ class GemmaGraph:
             logger.info(f"Tools: {rendered_tools}")
             logger.info(f"Document description: {documents_description}")
 
-            chain = prompt | self.llm_structured_output | JsonOutputParser()
+            llm_structured_output = ChatOpenAI(
+                **self.llm_common_params,
+                temperature=0,
+                # response_format=ToolCall,
+            )
+            chain = prompt | llm_structured_output | JsonOutputParser()
             tool_call_request = chain.invoke(
                 {"rendered_tools": rendered_tools, "documents_description": documents_description},
-                response_format=ToolCall,
             )
 
             if tool_call_request["name"] == "unknown":
@@ -296,9 +253,6 @@ class GemmaGraph:
                     }
                 )
                 update = {"tool_call_request": tool_call_request}
-            elif tool_call_request["name"] == "think":
-                goto = "think"
-                update = {"query": state}
             else:
                 goto = "invoke_tools"
                 update = {"tool_call_request": tool_call_request}
@@ -336,7 +290,7 @@ class GemmaGraph:
                         "Please use followed results to answer user querys.  \n"
                         "These are only internal information for you to generate your answer, "
                         "Please do not disclose every “memo” or “tool result” itself in your answer."
-                        f"\n\n## Result of {name} \n\n {tool_result['summary']} "
+                        f"\n\n## Result of {name} \n\n {tool_result} "
                     )
                 ]
             }

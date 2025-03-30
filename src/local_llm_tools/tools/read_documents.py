@@ -2,6 +2,7 @@ from logging import getLogger
 import operator
 from typing import Annotated
 
+from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from langchain_text_splitters import CharacterTextSplitter
@@ -11,6 +12,8 @@ from langgraph.graph import StateGraph
 from langgraph.types import Command
 from pydantic import BaseModel
 from pydantic import Field
+
+from local_llm_tools.utils.llm import ExtractKeyParser
 
 
 logger = getLogger(__name__)
@@ -85,32 +88,30 @@ CHUNK_PROMPT_TEMPLATE = ChatPromptTemplate.from_messages(
 )
 
 DOMAIN_SUMMARY_SYSTEM_PROMPT = """\
-あなたは、雑多な情報を整理、整形し扱いやすい情報に修正するエージェントです。
+あなたは、雑多な情報を整理・整形し、扱いやすい情報に修正するエージェントです。
+背景情報に含まれる重複した情報や冗長な表現をわかりやすく整理し、体系化し、Markdown形式で出力してください。
 
 以下のルールに従ってください。
-
-1. あなたの役割は質問に回答するための雑多な背景情報を整理して整理、整形することです。\
-2. 背景情報はユーザの質問に回答するために必要な情報を集めたものです。\
-具体的にはユーザの入力したファイルを一定のサイズのチャンクに分割し、\
-それぞれのチャンクから回答に必要だと思われる情報を抽出した情報を羅列したものです。
-3. あなたの整理・整形した結果は、ユーザの入力への回答を利用するために利用されます。
-4. 重複した城福や冗長な表現をわかりやすく読める形に整理してください。\
-情報が過度に落ちないように注意してください。
-5. 仮にあなたの知識を元に補足を加える場合、補足であることをわかりやすく記載してください。
+1.	あなたの役割は、質問に回答するための雑多な背景情報を整理・整形することです。
+2.	背景情報はユーザの質問に回答するためにファイルから以下の手順で抽出した情報群です。
+  1.	ファイルを一定のサイズごとのチャンクに分割。
+  2.	チャンクからユーザの依頼に対応するために必要な情報を抽出する。
+3.	抽出した情報をチャンクごとの順番に並べる。
+3.	背景情報はファイルを読み抽出した情報なので、ファイルの内容として扱うことができます。
+4.	もしあなたの知識を元に補足を加える場合は、「補足」など明示的な表現を用いて区別が分かるようにしてください。
+5.	あなたの出力は別の生成AIアシスタントがユーザの質問に回答するために利用されます。そのため、情報が欠落しないように気をつけてください。
+6.	ユーザからの質問は参考情報として扱ってください。つまりこの質問に回答する必要はありません。
 
 これらの指示に反する出力は行わないでください。
 
-## 質問
-
-{query}
-
-## 背景情報
+背景情報
 
 {information}
 """
 DOMAIN_PROMPT_TEMPLATE = ChatPromptTemplate.from_messages(
     [
-        ("human", DOMAIN_SUMMARY_SYSTEM_PROMPT),
+        ("human", "## 質問\n\n{query}"),
+        ("system", DOMAIN_SUMMARY_SYSTEM_PROMPT),
     ]
 )
 
@@ -129,7 +130,7 @@ class SearchDocGraph:
         """
         Args:
             llm (ChatOpenAI): 質問を回答するために利用するLLM
-            docs (dict[str, str]): 質問回答のソースとなるドキュメント
+            output_max_tokens(int): チャンクの要約のTokenサイズ
             chunk_size (int): ドキュメントを分割する長さ
             chunk_overlap (int): ドキュメントを分割する時に隣のチャンクと重ねる部分
         """
@@ -151,7 +152,7 @@ class SearchDocGraph:
         self.graph = self.build_graph()
 
     def as_tool(self):
-        return self.graph.as_tool(
+        return (self.graph | ExtractKeyParser("summary")).as_tool(
             name="Search Documents", description="Documentから質問の回答に必要な情報を抽出する"
         )
 
@@ -205,18 +206,16 @@ class SearchDocGraph:
         """
         logger.info("Search information from documents")
         information = []
-        chain = CHUNK_PROMPT_TEMPLATE | self.llm
+        chain = CHUNK_PROMPT_TEMPLATE | self.llm | StrOutputParser()
         for content in state.contents:
-            response = chain.invoke({"user_query": state.query, "document_chunk": content})
-            logger.info(
-                "Check text is null: {}".format(response.text().replace("\n", "") == "null")
-            )
-            logger.info(response.text())
-            text = response.text().strip()
-            if text.lower() == "null" or not text.startswith("#### Relevance Extraction"):
+            response = chain.invoke(
+                {"user_query": state.query, "document_chunk": content},
+            ).strip()
+            logger.info(response)
+            if response.lower() == "null" or not response.startswith("#### Relevance Extraction"):
                 pass
             else:
-                information.append(response.text())
+                information.append(response)
 
         return {
             "complete_docs": [state.doc_name],
@@ -230,7 +229,7 @@ class SearchDocGraph:
         logger.info("Generate answer from infomation")
         logger.info(f"The number of information: {len(state.information)}")
 
-        chain = DOMAIN_PROMPT_TEMPLATE | self.llm
+        chain = DOMAIN_PROMPT_TEMPLATE | self.llm | StrOutputParser()
 
         response = chain.invoke(
             {
@@ -238,7 +237,11 @@ class SearchDocGraph:
                 "query": state.query,
             }
         )
-        output_format = (
-            "ユーザの質問に回答するためにファイルを読み、回答に必要な情報をまとめました.\n\n{}\n\n"
+        output = (
+            "ユーザの質問に回答するためにファイルを読み、回答に必要な情報をまとめました.\n"
+            "この情報をファイルに記載されている内容として扱ってください。\n"
+            "```markdown\n"
+            f"{response}"
+            "“““\n\n"
         )
-        return {"summary": output_format.format(response.text())}
+        return {"summary": output}

@@ -72,18 +72,17 @@ class ChatBot:
             llm = llm.bind_tools(self.tools)
             self._agent = build_graph(llm, ToolNode(self.tools))
         else:
-            llm_structured_output = ChatOpenAI(
-                model=self.model_name,
-                temperature=0.0,
-                base_url="http://localhost:11434/v1",
-                api_key="ollama",
-            )
+            llm_common_params = {
+                "model": self.model_name,
+                "base_url": "http://localhost:11434/v1",
+                "api_key": "ollama",
+            }
 
             gemma_graph = GemmaGraph(
                 llm_chat=llm,
-                llm_structured_output=llm_structured_output,
                 tools=self.tools,
                 is_enable_think_tool=self.is_enable_think_tool,
+                llm_common_params=llm_common_params,
             )
             self._agent = gemma_graph
 
@@ -112,7 +111,7 @@ class ChatBot:
             )
         messages.append(HumanMessage(content=content))
 
-        for event in self.agent.stream(
+        for event in self.agent.graph.stream(
             {"messages": messages, "docs": docs},
             config,
             stream_mode="messages",
@@ -126,8 +125,8 @@ class ChatBot:
         指定したindexまでのMessageを削除する
         """
 
-        delete_messages = self.agent.get_state(config).values["messages"][message_idx:]
-        _ = self.agent.update_state(
+        delete_messages = self.agent.graph.get_state(config).values["messages"][message_idx:]
+        _ = self.agent.graph.update_state(
             config, {"messages": [RemoveMessage(id=msg.id) for msg in delete_messages]}
         )
 
@@ -138,5 +137,5 @@ class ChatBot:
         self.build()
 
     def history(self, config):
-        for msg in self._agent.get_state(config)[0]["messages"]:
+        for msg in self.agent.graph.get_state(config)[0]["messages"]:
             yield msg, msg.response_metadata.get("model", None), get_role_of_message(msg)

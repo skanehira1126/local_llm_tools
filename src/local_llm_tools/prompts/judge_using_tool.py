@@ -25,7 +25,7 @@ The `arguments` should be a dictionary, with keys corresponding \
 to the argument names and the values corresponding to the requested values.
 Do not include any additional text, commentary, or formatting.
 If none of the tools are applicable to the input, output the JSON object: \
-{{"name": "unknown", "arguments": {{}} }}
+{{"name": "no_tool_needed", "arguments": {{}} }}
 
 For the purpose of determining the appropriate tool, you can use the following information.
 - {documents_description}

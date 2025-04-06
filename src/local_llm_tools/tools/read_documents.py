@@ -100,7 +100,9 @@ class SearchDocGraph:
         return (self.graph | ExtractKeyParser("summary")).as_tool(
             name="Search Documents",
             description=(
-                "指定されたプロンプトに基づいて、**テキストドキュメント**を読み込み必要な情報を整理します。"
+                "ユーザの質問がドキュメントの要約やドキュメント内の記載内容に関する場合に、"
+                "ユーザの質問に関連する内容を取得する。"
+                "このツールはテキストドキュメントに対してのみ利用する。"
             ),
         )
 

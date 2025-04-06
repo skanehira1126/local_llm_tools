@@ -145,7 +145,6 @@ class GemmaGraph:
         """
         toolの有無によって向き先を変える
         """
-        print(state)
         if len(self.tools) or self.has_docs(state):
             return "judge_tool_use"
         else:
@@ -193,15 +192,15 @@ class GemmaGraph:
 
         # ドキュメントの有無の情報を取得
         if self.has_docs(state):
-            documents_description = "User provided text documents are available."
+            documents_description = "User provided **TEXT** documents are available."
+            # documents_description = "User documents are available, but should only be used if relevant to the question."
         else:
             documents_description = "There are NO text documents from user."
-        documents_description = ""
 
         # 直近の会話履歴を取得
         chat_history = "\n".join([f"- {msg.type}: {msg.text()}" for msg in state["messages"][-5:]])
 
-        tool_names = [t.name for t in tools] or ["dummy"]
+        tool_names = [t.name for t in tools] or ["no_tool_needed"]
         logger.info(f"Enable tools: {tool_names}")
 
         class ToolCall(BaseModel):
@@ -209,9 +208,11 @@ class GemmaGraph:
             呼び出すツール判定のための型
             """
 
-            # unknownもかなり重要みたい。ちゃんとStructure outputの制限として機能していそう
-            name: Literal[*tool_names, "unknown"] = Field(description="Tool name")
-            arguments: dict[str, str | int | float] = Field(descrition="Arguments to execute tool")
+            # no_tool_neededもかなり重要みたい。ちゃんとStructure outputの制限として機能していそう
+            name: Literal[*tool_names, "no_tool_needed"] = Field(description="Tool name")
+            arguments: dict[str, str | int | float] = Field(
+                description="Arguments to execute tool"
+            )
 
         # 最後がシステムメッセージの場合はChat終了
         if get_role_of_message(state["messages"][-1]) == "system":
@@ -236,7 +237,7 @@ class GemmaGraph:
                 },
             )
 
-            if tool_call_request.name == "unknown":
+            if tool_call_request.name == "no_tool_needed":
                 goto = "chat"
                 update = None
             else:

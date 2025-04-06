@@ -214,20 +214,16 @@ if is_update_chat_log:
     enable_files = {
         name: file.content for name, file in st.session_state.docs.items() if file.is_enable
     }
-    # if len(enable_files):
-    #     st.session_state.chatbot.register_docs(enable_files)
-    # else:
-    #     st.session_state.chatbot.register_docs(None)
 
     with st.chat_message("assistant"):
-        # st.markdown(f"`From {chatbot.model_name}`")
         if is_display_system_prompt:
             stream = st.session_state.chatbot.chat_stream(
                 prompt, images, enable_files, config, system_prompt
             )
         else:
             stream = st.session_state.chatbot.chat_stream(prompt, images, enable_files, config)
-        response = st.write_stream(stream)
+        with st.spinner(show_time=True):
+            response = st.write_stream(stream)
 
     # chatbot.add_assistant_message(content=response, model_name=chatbot.model_name)
 

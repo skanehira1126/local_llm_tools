@@ -1,20 +1,25 @@
 from inspect import signature
 
 from langchain.tools import BaseTool
+from langchain_ollama import ChatOllama
+from pydantic import BaseModel
 
 
 class ExtractKeyParser:
     def __init__(self, key: str):
         self.key = key
 
-    def __call__(self, text) -> str:
-        return text[self.key]
+    def __call__(self, output) -> str:
+        if isinstance(output, BaseModel):
+            return getattr(output, self.key)
+        else:
+            return output[self.key]
 
-    def parse(self, text) -> str:
-        return self.__call__(text)
+    def parse(self, output) -> str:
+        return self.__call__(output)
 
-    async def aparse(self, text) -> str:
-        return self.__call__(text)
+    async def aparse(self, output) -> str:
+        return self.__call__(output)
 
 
 def render_text_description(tools: list[BaseTool]) -> str:
@@ -33,6 +38,11 @@ def render_text_description(tools: list[BaseTool]) -> str:
         search: This tool is used for search
         calculator: This tool is used for math
     """
+    # Runnableから作ったtoolは対応していなさそう
+    overwrite_sig = {
+        "think": "(thought: str) -> str",
+        "Search Documents": "(query: str) -> str",
+    }
     descriptions = []
     for tool in tools:
         if hasattr(tool, "func") and tool.func:
@@ -45,7 +55,9 @@ def render_text_description(tools: list[BaseTool]) -> str:
     return "\n".join(descriptions)
 
 
-overwrite_sig = {
-    "think": "(thought: 'str') -> 'str'",
-    "Search Documents": "(query: 'str', docs: dict['str', 'str']) -> str",
-}
+class OllamaTokenCounter:
+    def __init__(self, model_name: str):
+        self.llm = ChatOllama(model=model_name)
+
+    def __call__(self, text: str):
+        return self.llm.get_num_tokens(text)

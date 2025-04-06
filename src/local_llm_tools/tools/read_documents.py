@@ -3,7 +3,6 @@ import operator
 from typing import Annotated
 
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from langchain_text_splitters import CharacterTextSplitter
 from langgraph.graph import END
@@ -13,7 +12,10 @@ from langgraph.types import Command
 from pydantic import BaseModel
 from pydantic import Field
 
+from local_llm_tools.prompts.read_documents import TEMPLATE_READ_CHUNK
+from local_llm_tools.prompts.read_documents import TEMPLATE_SUMMARIZE_CHUNK
 from local_llm_tools.utils.llm import ExtractKeyParser
+from local_llm_tools.utils.llm import OllamaTokenCounter
 
 
 logger = getLogger(__name__)
@@ -58,64 +60,6 @@ class OverallState(InputState, OutputState):
     )
 
 
-CHUNK_SYSTEM_PROMPT = """\
-あなたは、文書全体に対するユーザの回答とその文書全体の一部（チャンク）を入力として受け取るエージェントです。以下のルールに従って出力を行ってください。
-
-1. あなたの目的は、チャンク内から「ユーザの質問に関連する情報」を抜き出し、\
-回答作成に役立つ要点をリスト化することです。
-2. あなたの作成した要点リストは最終的に他のチャンクの要点のリストとまとめられ、\
-ユーザの入力への回答を利用するために利用されます。
-3. 抽出した情報がある場合は箇条書き形式で要点をまとめてください。\
-4. 質問に関連する情報がチャンク内に全く含まれない場合は、`null`のみを出力してください。
-5. 質問移管する情報が含まれる場合は出力の先頭には必ず\
-「#### Relevance Extraction」という見出しをつけてください。
-6. この抽出以外の目的や情報を付与しないでください。\
-与えられたチャンク以外の知識や推測も付け加えないでください。
-7. 冗長な説明や解釈、推測は行わず、チャンク内の情報のみ正確に反映してください。
-
-これらの指示に反する出力は行わないでください。
-"""
-
-
-CHUNK_PROMPT_TEMPLATE = ChatPromptTemplate.from_messages(
-    [
-        ("system", CHUNK_SYSTEM_PROMPT),
-        (
-            "human",
-            "## 文書のチャンク\n\n{document_chunk}\n## ユーザの質問\n\n{user_query}",
-        ),
-    ]
-)
-
-DOMAIN_SUMMARY_SYSTEM_PROMPT = """\
-あなたは、雑多な情報を整理・整形し、扱いやすい情報に修正するエージェントです。
-背景情報に含まれる重複した情報や冗長な表現をわかりやすく整理し、体系化し、Markdown形式で出力してください。
-
-以下のルールに従ってください。
-1.	あなたの役割は、質問に回答するための雑多な背景情報を整理・整形することです。
-2.	背景情報はユーザの質問に回答するためにファイルから以下の手順で抽出した情報群です。
-  1.	ファイルを一定のサイズごとのチャンクに分割。
-  2.	チャンクからユーザの依頼に対応するために必要な情報を抽出する。
-3.	抽出した情報をチャンクごとの順番に並べる。
-3.	背景情報はファイルを読み抽出した情報なので、ファイルの内容として扱うことができます。
-4.	もしあなたの知識を元に補足を加える場合は、「補足」など明示的な表現を用いて区別が分かるようにしてください。
-5.	あなたの出力は別の生成AIアシスタントがユーザの質問に回答するために利用されます。そのため、情報が欠落しないように気をつけてください。
-6.	ユーザからの質問は参考情報として扱ってください。つまりこの質問に回答する必要はありません。
-
-これらの指示に反する出力は行わないでください。
-
-背景情報
-
-{information}
-"""
-DOMAIN_PROMPT_TEMPLATE = ChatPromptTemplate.from_messages(
-    [
-        ("human", "## 質問\n\n{query}"),
-        ("system", DOMAIN_SUMMARY_SYSTEM_PROMPT),
-    ]
-)
-
-
 class SearchDocGraph:
     """
     Documentを読み込み、質問に回答する情報を探すグラフ
@@ -124,6 +68,7 @@ class SearchDocGraph:
     def __init__(
         self,
         llm: ChatOpenAI,
+        token_counter: OllamaTokenCounter,
         chunk_size: int = 4000,
         chunk_overlap: int = 200,
     ):
@@ -140,7 +85,7 @@ class SearchDocGraph:
             """
             Get number of tokens for input contents.
             """
-            return sum(llm.get_num_tokens(doc) for doc in documents)
+            return sum(token_counter(doc) for doc in documents)
 
         # text splitパラメータ
         self.text_splitter = CharacterTextSplitter(
@@ -153,7 +98,10 @@ class SearchDocGraph:
 
     def as_tool(self):
         return (self.graph | ExtractKeyParser("summary")).as_tool(
-            name="Search Documents", description="Documentから質問の回答に必要な情報を抽出する"
+            name="Search Documents",
+            description=(
+                "指定されたプロンプトに基づいて、**テキストドキュメント**を読み込み必要な情報を整理します。"
+            ),
         )
 
     def build_graph(self):
@@ -206,8 +154,8 @@ class SearchDocGraph:
         """
         logger.info("Search information from documents")
         information = []
-        chain = CHUNK_PROMPT_TEMPLATE | self.llm | StrOutputParser()
-        for content in state.contents:
+        chain = TEMPLATE_READ_CHUNK | self.llm | StrOutputParser()
+        for idx, content in enumerate(state.contents, 1):
             response = chain.invoke(
                 {"user_query": state.query, "document_chunk": content},
             ).strip()
@@ -215,7 +163,7 @@ class SearchDocGraph:
             if response.lower() == "null" or not response.startswith("#### Relevance Extraction"):
                 pass
             else:
-                information.append(response)
+                information.append(f"### チャンク {idx}\n\n" + response)
 
         return {
             "complete_docs": [state.doc_name],
@@ -229,19 +177,19 @@ class SearchDocGraph:
         logger.info("Generate answer from infomation")
         logger.info(f"The number of information: {len(state.information)}")
 
-        chain = DOMAIN_PROMPT_TEMPLATE | self.llm | StrOutputParser()
+        chain = TEMPLATE_SUMMARIZE_CHUNK | self.llm | StrOutputParser()
 
         response = chain.invoke(
             {
-                "information": "----------\n\n".join(state.information),
-                "query": state.query,
+                "chunks": "----------\n\n".join(state.information),
+                "user_query": state.query,
             }
         )
         output = (
-            "ユーザの質問に回答するためにファイルを読み、回答に必要な情報をまとめました.\n"
+            "ユーザが入力したファイルから回答に必要な情報をまとめました.\n"
             "この情報をファイルに記載されている内容として扱ってください。\n"
             "```markdown\n"
             f"{response}"
-            "“““\n\n"
+            "```\n\n"
         )
         return {"summary": output}

@@ -25,9 +25,11 @@ dependencies = [
     "markitdown[all]>=0.1",
     "langchain-text-splitters>=0.3.7",
     "grandalf>=0.8",
-    "transformers>=4.51.0",
-    "langchain-huggingface>=0.1.2",
-    "sentence-transformers>=4.0.2",
+    "transformers",
+    "langchain-huggingface",
+    "sentence-transformers",
+    "chromadb",
+    "sentencepiece>=0.2.0",
 ]
 readme = "README.md"
 requires-python = ">= 3.11"

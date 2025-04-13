@@ -86,3 +86,63 @@ def show_images(images: str, n_cols: int):
         # 3つグラフを描画したらcolumnsを更新
         if idx % n_cols == n_cols - 1:
             columns = st.columns([1] * n_cols)
+
+
+def display_vector_configs(
+    model_name_list: list[str] | None = None,
+    enable_contextual_embed: bool = False,
+):
+    """
+    ベクトルDB作成用のコンフィグ
+
+    Args:
+        model_name_list (list[str] | None): ollamaモデルリスト
+        enable_contextual_embed (bool): すでに初期化済みでcontextual embeddingが有効か
+    """
+    with st.container(border=True):
+        # Context付き Embeddingの制御
+        enable_contextual_embed = st.toggle("Contextual Embeddings", value=enable_contextual_embed)
+
+        # Embedding Model
+        embed_model = st.selectbox(
+            "embed_model",
+            options=["pkshatech/GLuCoSE-base-ja-v2", "hotchpotch/static-embed-japanese"],
+        )
+        if embed_model in ["pkshatech/GLuCoSE-base-ja-v2"]:
+            # GLuCoSEは質問と回答で合わせる必要がある
+            # https://huggingface.co/pkshatech/GLuCoSE-base-ja-v2
+            embed_prompt_template = {
+                "input": "query: {}",
+                "output": "passage: {}",
+            }
+        else:
+            embed_prompt_template = {
+                "input": "{}",
+                "output": "{}",
+            }
+
+        # Context付きEmbedding
+        # https://maihem.ai/articles/10-tips-to-improve-your-rag-system#:~:text=4
+        if enable_contextual_embed:
+            # モデル選択
+            if model_name_list:
+                llm_model_name = st.selectbox(
+                    "model_name",
+                    options=model_name_list,
+                )
+            else:
+                llm_model_name = st.text_input("LLM model name")
+            llm_parameters = {"temperature": 0, "top_p": 1}
+            params_contextual_embed = {
+                "model": llm_model_name,
+            }
+            params_contextual_embed.update(llm_parameters)
+        else:
+            params_contextual_embed = {}
+
+        return (
+            embed_model,
+            embed_prompt_template,
+            enable_contextual_embed,
+            params_contextual_embed,
+        )

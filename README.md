@@ -11,3 +11,6 @@ Ollamaを利用したローカル生成AI開発
 ## TODO
 - Documentの読み込み。subgraphで実装する予定.
 
+## メモ
+### Documentの埋め込みについて
+`split_docs.py`でjsonファイルを作成できるので、その結果を使っている

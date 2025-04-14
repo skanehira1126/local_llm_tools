@@ -1,3 +1,4 @@
+from copy import deepcopy
 import json
 from logging import getLogger
 import pathlib
@@ -38,7 +39,11 @@ def setup_sidebar():
     with st.form("ChromaDBマネージャー"):
         file_path = st.text_input("読み込むChromaDBのパス")
         if st.form_submit_button("読み込み"):
-            st.session_state.preview_client = chromadb.PersistentClient(path=file_path)
+            if pathlib.Path(file_path).exists():
+                st.session_state.preview_client = chromadb.PersistentClient(path=file_path)
+            else:
+                st.warning(f"{file_path} is not found.")
+                st.rerun()
 
     if client := st.session_state.get("preview_client", None):
         collection_name_list = [collection.name for collection in client.list_collections()]
@@ -47,6 +52,7 @@ def setup_sidebar():
         if selected_collection:
             collection = client.get_collection(name=selected_collection)
             st.markdown(f"- 件数: {collection.count()}")
+            st.markdown("### Preview")
             st.json(collection.peek())
 
 
@@ -102,7 +108,7 @@ else:
 # =====================
 def trunc_content(content: str, max_length: int):
     if len(content) >= max_length + 1:
-        return content[:max_length] + "\n ..."
+        return content[:max_length] + "\n ....."
     else:
         return content
 
@@ -113,7 +119,7 @@ st.markdown("### Document preview")
 max_length = st.number_input("コンテキストの最大長", min_value=1, value=50)
 preview_json = []
 for chunk in document_chunks:
-    chunk_preview = chunk.copy()
+    chunk_preview = deepcopy(chunk)
 
     # 50文字以上ある場合、50文字までで切り取る
     chunk_preview["content"] = trunc_content(chunk_preview["content"], max_length)
@@ -176,6 +182,14 @@ if st.button("ベクトル化実行"):
 if "chromadb_inputs" not in st.session_state:
     st.stop()
 
+
+# ====================
+#
+# 情報を表示
+#
+# ====================
+st.json(st.session_state.chromadb_inputs)
+
 with st.form("ベクトルDBへ保存", border=True):
     file_path = st.text_input("ChromaDBの保存場所")
     collection_name = st.text_input("ChromaDBのコレクション名")
@@ -196,3 +210,5 @@ with st.form("ベクトルDBへ保存", border=True):
         )
 
         collection.add(**st.session_state.chromadb_inputs)
+
+        st.info("Add done")

@@ -3,8 +3,10 @@ from logging import getLogger
 import streamlit as st
 
 from local_llm_tools.tools import MATH_TOOLS
+from local_llm_tools.tools import PLAN_TOOLS
 from local_llm_tools.tools import SEARCH_TOOLS
 from local_llm_tools.tools import THINK_TOOLS
+from local_llm_tools.tools import make_rag_tool
 from local_llm_tools.utils import helps
 from local_llm_tools.utils.llm_configs import SYSTEM_PROMPT
 from local_llm_tools.utils.llm_configs import TEMPERATURE
@@ -12,6 +14,22 @@ from local_llm_tools.utils.llm_configs import TOP_P
 
 
 logger = getLogger(__name__)
+
+
+def make_tool_list(selection: list[str]):
+    tools = []
+    if "math" in selection:
+        tools += MATH_TOOLS
+    if "search" in selection:
+        tools += SEARCH_TOOLS
+    if "think" in selection:
+        tools += THINK_TOOLS
+    if "plan" in selection:
+        tools += PLAN_TOOLS
+    if "RAG" in selection:
+        collection = st.session_state.get("vector_store_collection", None)
+        tools += [make_rag_tool(collection)]
+    return tools
 
 
 def display_llm_initial_configs(
@@ -37,15 +55,15 @@ def display_llm_initial_configs(
         # ツール
         if add_tools:
             is_tool_use_model = st.checkbox("Tool対応モデル")
-            options = ["math", "search", "think"]
+            options = ["math", "search", "think", "plan"]
+
+            # RAGの判定
+            collection = st.session_state.get("vector_store_collection", None)
+            if collection:
+                options.append("RAG")
+
             selection = st.pills("利用ツール", options, selection_mode="multi")
-            tools = []
-            if "math" in selection:
-                tools += MATH_TOOLS
-            if "search" in selection:
-                tools += SEARCH_TOOLS
-            if "think" in selection:
-                tools += THINK_TOOLS
+            tools = make_tool_list(selection)
 
         # パラメータ
         temperature = st.slider(

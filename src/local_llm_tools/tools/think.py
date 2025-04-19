@@ -10,6 +10,7 @@ class ThinkInput(BaseModel):
 
 
 @tool(
+    name_or_callable="think",
     args_schema=ThinkInput,
     return_direct=True,
 )

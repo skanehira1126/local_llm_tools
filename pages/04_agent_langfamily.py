@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from logging import getLogger
+import pathlib
 
+import chromadb
 import markitdown
 import streamlit as st
 
@@ -25,9 +27,43 @@ def setup_sidebar():
     """
     if "docs" not in st.session_state:
         st.session_state.docs = {}
+    if "vector_store_client" not in st.session_state:
+        st.session_state.vector_store_client = None
+        st.session_state.vector_store_collection = None
 
+    # RAGのためのベクトルストア
+    with st.form("ベクトルストア"):
+        file_path = st.text_input("読み込むChromaDBのパス")
+        if st.form_submit_button("読み込み"):
+            if len(file_path) >= 1 and pathlib.Path(file_path).exists():
+                st.session_state.vector_store_client = chromadb.PersistentClient(path=file_path)
+            else:
+                st.warning(f"{file_path} is not found.")
+                st.session_state.vector_store_client = None
+                st.session_state.vector_store_collection = None
+            st.rerun()
+
+    # 利用するコレクションの選択
+    if client := st.session_state.get("vector_store_client", None):
+        collection_name_list = [collection.name for collection in client.list_collections()]
+
+        selected_collection = st.pills("表示するコレクション", options=collection_name_list)
+        if selected_collection:
+            collection = client.get_collection(name=selected_collection)
+            st.session_state.vector_store_collection = collection
+
+            # 情報の可視化
+            st.markdown(f"- 件数: {collection.count()}")
+            st.markdown("### Preview")
+            st.json(collection.peek())
+
+            st.markdown("### Metadata")
+            st.json(collection.metadata)
+        else:
+            st.warning("RAGを利用する場合は、対象のCollectionを選択してください")
+
+    # 使いたいファイルの読み込み
     uploaded_files = st.file_uploader("ソースファイル", accept_multiple_files=True)
-
     # 読み込み
     md = markitdown.MarkItDown()
     for uploaded_file in uploaded_files:
@@ -69,12 +105,14 @@ st.set_page_config(page_title="Chatbot implemented by langfamily", layout="wide"
 col1, col2 = st.columns([8, 2])
 col1.title("Chat Bot")
 col1.markdown("""langgraphを使ってtoolを呼び出せるようにする""")
-col2.button(
-    "リセット",
-    key="clear_all",
-    icon=":material/clear_all:",
-    on_click=reset_history,
-)
+
+if "chatbot" not in st.session_state:
+    col2.button(
+        "リセット",
+        key="clear_all",
+        icon=":material/clear_all:",
+        on_click=reset_history,
+    )
 
 config = {"configurable": {"thread_id": "1"}}
 

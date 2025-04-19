@@ -18,11 +18,26 @@ RESULT:
 {tool_result}
 """
 
+TOOL_RESULT_NO_ARGS_TEMPLATE = """\
+[Tool:{tool_name}]
+RESULT:
+{tool_result}
+"""
+
 TEMPLATE_INVOKE_TOOL_RESULT = ChatPromptTemplate.from_messages(
     [
         (
             "system",
             TOOL_RESULT_TEMPLATE,
+        )
+    ]
+)
+
+TEMPLATE_INVOKE_TOOL_RESULT_NO_ARGS = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            TOOL_RESULT_NO_ARGS_TEMPLATE,
         )
     ]
 )

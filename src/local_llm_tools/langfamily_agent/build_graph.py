@@ -22,6 +22,7 @@ from pydantic import Field
 
 from local_llm_tools.langfamily_agent.utils import get_role_of_message
 from local_llm_tools.prompts.invoke_tool_result import TEMPLATE_INVOKE_TOOL_RESULT
+from local_llm_tools.prompts.invoke_tool_result import TEMPLATE_INVOKE_TOOL_RESULT_NO_ARGS
 from local_llm_tools.prompts.invoke_tool_result import TEMPLATE_TOOL_EXECUTE_ERROR
 from local_llm_tools.prompts.judge_using_tool import TEMPLATE_JUDGE_USING_TOOL
 from local_llm_tools.tools.read_documents import SearchDocGraph
@@ -281,13 +282,21 @@ class GemmaGraph:
         requested_tool = tool_name_to_tool[state.name]
         try:
             tool_result = requested_tool.invoke(state.arguments, config=config)
-            messages = TEMPLATE_INVOKE_TOOL_RESULT.invoke(
-                {
-                    "tool_name": state.name,
-                    "tool_result": tool_result,
-                    "arguments": state.arguments,
-                }
-            ).to_messages()
+            if state.name in ("think", "plan"):
+                messages = TEMPLATE_INVOKE_TOOL_RESULT_NO_ARGS.invoke(
+                    {
+                        "tool_name": state.name,
+                        "tool_result": tool_result,
+                    }
+                ).to_messages()
+            else:
+                messages = TEMPLATE_INVOKE_TOOL_RESULT.invoke(
+                    {
+                        "tool_name": state.name,
+                        "tool_result": tool_result,
+                        "arguments": state.arguments,
+                    }
+                ).to_messages()
 
             # Tool MessageであるMetadataを付与
             for msg in messages:
@@ -300,8 +309,9 @@ class GemmaGraph:
                 )
 
             return {"messages": messages}
-        except:
+        except Exception as e:
             logger.exception(f"Arguments: {state.arguments}")
+            print(e)
             return {
                 "messages": TEMPLATE_TOOL_EXECUTE_ERROR.invoke({"name": state.name}).to_messages()
             }

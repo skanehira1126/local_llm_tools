@@ -23,7 +23,6 @@ class ChatBot:
         tools: list[StructuredTool],
         is_tool_use_model: bool,
         params: dict | None = None,
-        is_enable_think_tool: bool = False,
     ):
         self.model_name = model_name
         self.messages: list[AIMessage | HumanMessage | SystemMessage] = []
@@ -32,8 +31,6 @@ class ChatBot:
         self.params: dict = {}
         if params is not None:
             self.params.update(params)
-
-        self.is_enable_think_tool = is_enable_think_tool
 
         # OllamaはTool対応していないモデルがある
         self.tools = tools
@@ -81,7 +78,6 @@ class ChatBot:
             gemma_graph = GemmaGraph(
                 llm_chat=llm,
                 tools=self.tools,
-                is_enable_think_tool=self.is_enable_think_tool,
                 llm_common_params=llm_common_params,
             )
             self._agent = gemma_graph

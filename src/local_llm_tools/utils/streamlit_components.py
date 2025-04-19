@@ -4,6 +4,7 @@ import streamlit as st
 
 from local_llm_tools.tools import MATH_TOOLS
 from local_llm_tools.tools import SEARCH_TOOLS
+from local_llm_tools.tools import THINK_TOOLS
 from local_llm_tools.utils import helps
 from local_llm_tools.utils.llm_configs import SYSTEM_PROMPT
 from local_llm_tools.utils.llm_configs import TEMPERATURE
@@ -43,7 +44,8 @@ def display_llm_initial_configs(
                 tools += MATH_TOOLS
             if "search" in selection:
                 tools += SEARCH_TOOLS
-            is_enable_think_tool = "think" in selection
+            if "think" in selection:
+                tools += THINK_TOOLS
 
         # パラメータ
         temperature = st.slider(
@@ -69,7 +71,6 @@ def display_llm_initial_configs(
             top_p,
             tools,
             is_tool_use_model,
-            is_enable_think_tool,
         )
     else:
         return system_prompt, model_name, temperature, top_p

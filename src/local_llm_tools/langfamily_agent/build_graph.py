@@ -25,10 +25,12 @@ from local_llm_tools.prompts.invoke_tool_result import TEMPLATE_INVOKE_TOOL_RESU
 from local_llm_tools.prompts.invoke_tool_result import TEMPLATE_TOOL_EXECUTE_ERROR
 from local_llm_tools.prompts.judge_using_tool import TEMPLATE_JUDGE_USING_TOOL
 from local_llm_tools.tools.read_documents import SearchDocGraph
-from local_llm_tools.tools.think import ThinkGraph
 from local_llm_tools.utils.llm import OllamaTokenCounter
+from local_llm_tools.utils.llm import build_chat_history
 from local_llm_tools.utils.llm import render_text_description
 
+
+# from local_llm_tools.tools.think import ThinkGraph
 
 logger = getLogger(__name__)
 
@@ -95,7 +97,6 @@ class GemmaGraph:
         self,
         llm_chat: ChatOpenAI,
         tools: list[BaseTool],
-        is_enable_think_tool: bool = False,
         llm_common_params: dict | None = None,
     ):
         # 利用するLLM
@@ -103,12 +104,15 @@ class GemmaGraph:
 
         # graphの作成
         self.tools = tools
-        if is_enable_think_tool:
-            self.tools.append(
-                ThinkGraph(ChatOpenAI(**llm_common_params, temperature=1.0)).as_tool()
-            )
 
-        # LLMを利用するTook
+        # これはLLM thinkツール
+        # Local LLMやと必要かも
+        # if is_enable_think_tool:
+        #   self.tools.append(
+        #        ThinkGraph(ChatOpenAI(**llm_common_params, temperature=1.0)).as_tool()
+        #    )
+
+        # LLMを利用するTool
         self.search_docs_graph = SearchDocGraph(
             ChatOpenAI(**llm_common_params, temperature=1.0, max_tokens=1000),
             token_counter=OllamaTokenCounter(llm_common_params["model"]),
@@ -131,7 +135,7 @@ class GemmaGraph:
         # Edge
         # toolがないときはただのchat
         graph_builder.add_conditional_edges(START, self._rooting_judge_tools)
-        graph_builder.add_edge("invoke_tools", "chat")
+        graph_builder.add_edge("invoke_tools", "judge_tool_use")
         graph_builder.add_edge("chat", "remove_messages")
         graph_builder.add_edge("remove_messages", END)
 
@@ -193,12 +197,12 @@ class GemmaGraph:
         # ドキュメントの有無の情報を取得
         if self.has_docs(state):
             documents_description = "User provided **TEXT** documents are available."
-            # documents_description = "User documents are available, but should only be used if relevant to the question."
         else:
             documents_description = "There are NO text documents from user."
 
         # 直近の会話履歴を取得
-        chat_history = "\n".join([f"- {msg.type}: {msg.text()}" for msg in state["messages"][-5:]])
+        chat_history = build_chat_history(state, 10)
+        logger.info(f"Chat history: {chat_history}")
 
         tool_names = [t.name for t in tools] or ["no_tool_needed"]
         logger.info(f"Enable tools: {tool_names}")
@@ -209,13 +213,18 @@ class GemmaGraph:
             """
 
             # no_tool_neededもかなり重要みたい。ちゃんとStructure outputの制限として機能していそう
-            name: Literal[*tool_names, "no_tool_needed"] = Field(description="Tool name")
+            name: Literal[*tool_names, "no_tool_needed"] = Field(
+                description="ツールを使うべきか判断した結果"
+            )
             arguments: dict[str, str | int | float] = Field(
                 description="Arguments to execute tool"
             )
 
         # 最後がシステムメッセージの場合はChat終了
-        if get_role_of_message(state["messages"][-1]) == "system":
+        latest_message = state["messages"][-1]
+        if (get_role_of_message(latest_message) == "system") and not (
+            latest_message.additional_kwargs.get("metadata", {}).get("tool_call", False)
+        ):
             goto = END
             update = None
         else:
@@ -224,7 +233,7 @@ class GemmaGraph:
 
             llm_structured_output = ChatOpenAI(
                 **self.llm_common_params,
-                temperature=0,
+                temperature=0.1,
             )
             chain = TEMPLATE_JUDGE_USING_TOOL | llm_structured_output.with_structured_output(
                 ToolCall
@@ -232,7 +241,7 @@ class GemmaGraph:
             tool_call_request = chain.invoke(
                 {
                     "rendered_tools": rendered_tools,
-                    "chat_history": chat_history,
+                    "history": state["messages"][-10:],
                     "documents_description": documents_description,
                 },
             )
@@ -272,11 +281,25 @@ class GemmaGraph:
         requested_tool = tool_name_to_tool[state.name]
         try:
             tool_result = requested_tool.invoke(state.arguments, config=config)
-            return {
-                "messages": TEMPLATE_INVOKE_TOOL_RESULT.invoke(
-                    {"name": state.name, "tool_result": tool_result}
-                ).to_messages()
-            }
+            messages = TEMPLATE_INVOKE_TOOL_RESULT.invoke(
+                {
+                    "tool_name": state.name,
+                    "tool_result": tool_result,
+                    "arguments": state.arguments,
+                }
+            ).to_messages()
+
+            # Tool MessageであるMetadataを付与
+            for msg in messages:
+                msg.additional_kwargs.setdefault("metadata", {})
+                msg.additional_kwargs["metadata"].update(
+                    {
+                        "tool_call": True,
+                        "tool_name": state.name,
+                    }
+                )
+
+            return {"messages": messages}
         except:
             logger.exception(f"Arguments: {state.arguments}")
             return {

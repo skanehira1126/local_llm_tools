@@ -40,7 +40,7 @@ def render_text_description(tools: list[BaseTool]) -> str:
     """
     # Runnableから作ったtoolは対応していなさそう
     overwrite_sig = {
-        "think": "(thought: str) -> str",
+        #     "think": "(thought: str) -> str",
         "Search Documents": "(query: str) -> str",
     }
     descriptions = []
@@ -61,3 +61,14 @@ class OllamaTokenCounter:
 
     def __call__(self, text: str):
         return self.llm.get_num_tokens(text)
+
+
+def build_chat_history(state, keep_last=5):
+    msgs = state["messages"]
+    start = max(len(msgs) - keep_last, 0)
+    prefix = "...<snip earlier turns>...\n" if start > 0 else ""
+
+    body = "\n".join(
+        f"{start + idx}. {m.type.capitalize()}: {m.text()}" for idx, m in enumerate(msgs[start:])
+    )
+    return prefix + body

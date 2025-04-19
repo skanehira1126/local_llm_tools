@@ -5,6 +5,7 @@ import markitdown
 import streamlit as st
 
 from local_llm_tools.langfamily_agent.agent import ChatBot
+from local_llm_tools.prompts.invoke_tool_result import TOOL_RESULT_TEMPLATE
 from local_llm_tools.utils import ollama as ollama_utils
 from local_llm_tools.utils import setup_langsmith
 from local_llm_tools.utils.image import encode_image
@@ -100,7 +101,6 @@ if "chatbot" not in st.session_state:
         top_p,
         tools,
         is_tool_use_model,
-        is_enable_think_tool,
     ) = display_llm_initial_configs(
         model_name_list=ollama_utils.enable_models(),
         add_tools=True,
@@ -113,7 +113,6 @@ if "chatbot" not in st.session_state:
         },
         tools=tools,
         is_tool_use_model=is_tool_use_model,
-        is_enable_think_tool=is_enable_think_tool,
     )
 
     history = []
@@ -209,6 +208,26 @@ else:
 # ユーザの入力に更新があった場合に更新
 #
 ###############
+TOOL_RESULT_FORMAT = TOOL_RESULT_TEMPLATE.format(
+    tool_name="<tool_name>",
+    arguments="<arguments>",
+    tool_result="<tool_result>",
+)
+
+GLOBAL_SYSTEM_PROMPT = """## 共通ルール
+- あなたは様々な外部ツールの出力を受け取り、それを元にユーザーに回答するAIです。
+- ツールの出力は system ロールで提供され、以下のフォーマットで提供されます。
+
+```text
+{tool_result_format}
+```
+
+- ツール出力を元に、正確かつ簡潔に assistant ロールとして回答してください。
+- tool出力をそのまま返さず、適切に自然言語で言い換えるようにしてください。
+
+## ユーザ指定ルール
+{system_prompt}
+"""
 if is_update_chat_log:
     # ユーザからのソースファイルの情報を反映
     enable_files = {
@@ -218,7 +237,13 @@ if is_update_chat_log:
     with st.chat_message("assistant"):
         if is_display_system_prompt:
             stream = st.session_state.chatbot.chat_stream(
-                prompt, images, enable_files, config, system_prompt
+                prompt,
+                images,
+                enable_files,
+                config,
+                GLOBAL_SYSTEM_PROMPT.format(
+                    tool_result_format=TOOL_RESULT_FORMAT, system_prompt=system_prompt
+                ),
             )
         else:
             stream = st.session_state.chatbot.chat_stream(prompt, images, enable_files, config)

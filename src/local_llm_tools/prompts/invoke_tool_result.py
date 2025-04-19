@@ -5,25 +5,24 @@ from pydantic import Field
 
 # ツール実行結果のTemplate
 class ParamsInvokeToolResult(BaseModel):
-    name: str = Field(description="The name of tool that is executed")
+    tool_name: str = Field(description="The name of tool that is executed")
+    arguments: str = Field(description="Arguments")
     tool_result: str = Field(description="The result of tool")
 
+
+TOOL_RESULT_TEMPLATE = """\
+[Tool:{tool_name}]
+ARGS:
+{arguments}
+RESULT:
+{tool_result}
+"""
 
 TEMPLATE_INVOKE_TOOL_RESULT = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            """\
-Please use followed results to answer user querys.
-These are only internal information for you to generate your answer, \
-Please do not disclose every “memo” or “tool result” itself in your answer.
-
-## Result of {name}
-
-```
-{tool_result}
-```
-""",
+            TOOL_RESULT_TEMPLATE,
         )
     ]
 )
